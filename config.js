@@ -5,7 +5,7 @@
 // (Project Settings -> API -> Project URL и anon public key)
 // ============================================================
 
-const SUPABASE_URL = "ВСТАВЬ_СЮДА_PROJECT_URL"; // например: https://abcdefgh.supabase.co
-const SUPABASE_ANON_KEY = "ВСТАВЬ_СЮДА_ANON_KEY";
+const SUPABASE_URL = "https://nafbhichchrigtmxceoi.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_JX9fsvUyWOmCqXfddfVozQ_kCQqCMd0";
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
