@@ -5,7 +5,6 @@ let currentDetail = null;
 let dataLoaded = false;
 let studentSearchQuery = "";
 
-// ---------- УТИЛИТЫ ДАТ ----------
 function getCurrentMonthPrefix() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -14,7 +13,6 @@ function getCurrentMonthName() {
   return new Date().toLocaleString('ru-RU', { month: 'long' });
 }
 
-// ---------- ИНИЦИАЛИЗАЦИЯ ----------
 async function initData() {
   showLoadingOverlay(true);
   try {
@@ -53,7 +51,6 @@ function showToast(msg) {
   setTimeout(() => { t.style.display = "none"; }, 2200);
 }
 
-// ---------- АВТОРИЗАЦИЯ ----------
 async function doLogin() {
   const login = document.getElementById("login-input").value.trim().toLowerCase();
   const password = document.getElementById("password-input").value;
@@ -112,18 +109,17 @@ function defaultTabForRole(role) {
   return "dashboard";
 }
 
-// ---------- НАВИГАЦИЯ ----------
 const NAV_CONFIG = {
   owner: [
     { id: "dashboard", label: "Главная", icon: "☉" },
     { id: "students", label: "Ученики", icon: "👤" },
-    { id: "groups", label: "Группы", icon: "" },
+    { id: "groups", label: "Группы", icon: "👥" },
     { id: "payments", label: "Оплаты", icon: "₽" },
   ],
   admin: [
     { id: "dashboard", label: "Главная", icon: "☉" },
-    { id: "students", label: "Ученики", icon: "" },
-    { id: "groups", label: "Группы", icon: "" },
+    { id: "students", label: "Ученики", icon: "👤" },
+    { id: "groups", label: "Группы", icon: "👥" },
     { id: "payments", label: "Оплаты", icon: "₽" },
   ],
   teacher: [
@@ -174,7 +170,6 @@ function closeDetail() {
   renderPage();
 }
 
-// ---------- БАЗОВЫЕ УТИЛИТЫ ----------
 function getStudent(id) { return DB.students.find(s => s.id === id); }
 function getGroup(id) { return DB.groups.find(g => g.id === id); }
 function getTeacher(id) { return DB.teachers.find(t => t.id === id); }
@@ -219,6 +214,51 @@ function studentsForParent() {
   return DB.students.filter(s => ids.includes(s.id));
 }
 
-// ---------- РЕНДЕР СТРАНИЦ ----------
 function renderPage() {
-  const
+  const el = document.getElementById("page-content");
+  if (currentDetail) {
+    if (currentDetail.type === "student") { el.innerHTML = renderStudentDetail(currentDetail.id); return; }
+    if (currentDetail.type === "group") { el.innerHTML = renderGroupDetail(currentDetail.id); return; }
+  }
+  
+  const role = currentUser.role;
+  if ((role === "owner" || role === "admin") && currentTab === "dashboard") { el.innerHTML = renderDashboard(); return; }
+  if (currentTab === "students") { el.innerHTML = renderStudentsList(); return; }
+  if (currentTab === "groups") { el.innerHTML = renderGroupsList(); return; }
+  if (currentTab === "payments") { el.innerHTML = renderPaymentsPage(); return; }
+  if (currentTab === "homework") { el.innerHTML = renderHomeworkPage(); return; }
+  if (currentTab === "feedback") { el.innerHTML = renderFeedbackPage(); return; }
+  if (currentTab === "child") { el.innerHTML = renderChildPage(); return; }
+  
+  el.innerHTML = `<div class="empty-state">Раздел не найден</div>`;
+}
+
+function renderDashboard() {
+  const totalStudents = DB.students.length;
+  const totalGroups = DB.groups.length;
+  const monthPrefix = getCurrentMonthPrefix();
+  
+  const monthRevenue = DB.payments
+    .filter(p => p.date.startsWith(monthPrefix))
+    .reduce((sum, p) => sum + p.amount, 0);
+    
+  const expiringCount = DB.students.filter(s => daysUntil(s.nextPaymentDate) <= 3 || remainingLessons(s) <= 0).length;
+  const expiring = DB.students
+    .filter(s => daysUntil(s.nextPaymentDate) <= 5 || remainingLessons(s) <= 2)
+    .sort((a, b) => daysUntil(a.nextPaymentDate) - daysUntil(b.nextPaymentDate));
+
+  return `
+    <div class="page-title">Главная</div>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-value">${totalStudents}</div><div class="stat-label">Учеников</div></div>
+      <div class="stat-card"><div class="stat-value">${totalGroups}</div><div class="stat-label">Групп</div></div>
+      <div class="stat-card"><div class="stat-value">${monthRevenue.toLocaleString('ru-RU')} ₽</div><div class="stat-label">Оплаты за ${getCurrentMonthName()}</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:${expiringCount > 0 ? 'var(--danger)' : 'var(--navy)'}">${expiringCount}</div><div class="stat-label">Истекает абонемент</div></div>
+    </div>
+    <div class="section-label">Требуют внимания</div>
+    ${expiring.length === 0 ? 
+      `<div class="empty-state"><div class="empty-state-icon">&#10003;</div>Все абонементы в порядке</div>` :
+      expiring.map(s => {
+        const badge = paymentStatusBadge(s);
+        return `
+          <div class="list-item"
