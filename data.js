@@ -113,3 +113,41 @@ async function dbMarkAttendance(lessonId, studentId, status) {
   } else {
     await supabaseClient.from("attendance").upsert({
       lesson_id: lessonId, student_id: studentId, status
+    }, { onConflict: "lesson_id,student_id" });
+    
+    if (status === "present" && current !== "present") {
+      const s = DB.students.find(st => st.id === studentId);
+      if (s) {
+        await supabaseClient.from("students").update({
+          subscription_used: Math.min(s.subscriptionUsed + 1, s.subscriptionTotal + 5)
+        }).eq("id", studentId);
+      }
+    }
+  }
+  await supabaseClient.from("lessons").update({ status: "completed" }).eq("id", lessonId);
+  await loadAllFromSupabase();
+}
+
+async function dbAddLesson(groupId, date, topic) {
+  await supabaseClient.from("lessons").insert({
+    id: "l" + Date.now(), group_id: groupId, date, topic, status: "upcoming"
+  });
+  await loadAllFromSupabase();
+}
+
+async function dbAddHomework(studentId, groupId, text) {
+  const today = new Date().toISOString().slice(0, 10);
+  await supabaseClient.from("homework").insert({
+    id: "hw" + Date.now(), student_id: studentId, group_id: groupId,
+    date: today, text, status: "assigned"
+  });
+  await loadAllFromSupabase();
+}
+
+async function dbAddFeedback(studentId, teacherId, text) {
+  const today = new Date().toISOString().slice(0, 10);
+  await supabaseClient.from("feedback").insert({
+    id: "f" + Date.now(), student_id: studentId, date: today, teacher_id: teacherId, text
+  });
+  await loadAllFromSupabase();
+}
