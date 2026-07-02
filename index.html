@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>EngLand CRM</title>
-<link rel="icon" type="image/png" href="/Аватарка.png">
 <style>
   :root {
     --navy: #1E2D4E;
@@ -280,9 +279,15 @@
 
 <div id="login-screen">
   <div class="login-box">
-    <img src= "https://github.com/igorkhraban-boop/englandcrm/blob/039b44bac3cf736c71a221d0c3b97109965b8cc2/logo_blue.png" 
-     alt="EngLand" 
-     style="width:200px;height:auto;margin-bottom:20px;">
+    <div class="login-logo">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+        <rect width="32" height="32" rx="3" fill="#E63030"/>
+        <rect x="0" y="16" width="16" height="16" fill="#1282CA"/>
+        <path d="M7 25 L25 7" stroke="white" stroke-width="4.5" stroke-linecap="round"/>
+        <path d="M25 7 L25 17" stroke="white" stroke-width="4.5" stroke-linecap="round"/>
+        <path d="M25 7 L15 7" stroke="white" stroke-width="4.5" stroke-linecap="round"/>
+      </svg>
+      <div class="login-logo-text"><span class="e">Eng</span><span class="l">Land</span></div>
     </div>
     <div class="login-title">Вход в систему управления школой</div>
     <div class="login-error" id="login-error">Неверный логин или пароль</div>
