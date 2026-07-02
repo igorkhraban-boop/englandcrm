@@ -1,11 +1,6 @@
 // ============================================================
-// EngLand CRM — слой данных (Supabase вместо localStorage)
+// EngLand CRM — слой данных (Supabase)
 // ============================================================
-// Все функции возвращают Promise, т.к. обращаются к сети.
-// DB остаётся глобальным объектом в памяти — заполняется при
-// загрузке и обновляется realtime-подпиской.
-// ============================================================
-
 let DB = {
   users: {},
   teachers: [],
@@ -38,7 +33,6 @@ async function loadAllFromSupabase() {
     supabaseClient.from("feedback").select("*"),
   ]);
 
-  // users: массив -> объект по логину (как было в локальной версии)
   const usersObj = {};
   (usersRes.data || []).forEach(u => {
     usersObj[u.login] = {
@@ -50,7 +44,6 @@ async function loadAllFromSupabase() {
     };
   });
 
-  // attendance: массив строк -> вложенный объект {lessonId: {studentId: status}}
   const attendanceObj = {};
   (attendanceRes.data || []).forEach(a => {
     if (!attendanceObj[a.lesson_id]) attendanceObj[a.lesson_id] = {};
@@ -77,7 +70,7 @@ async function loadAllFromSupabase() {
   DB.feedback = (feedbackRes.data || []).map(f => ({ ...f, studentId: f.student_id, teacherId: f.teacher_id }));
 }
 
-// ---------- REALTIME: подписка на изменения от других пользователей ----------
+// ---------- REALTIME ----------
 function subscribeToRealtimeUpdates(onChange) {
   const tables = ["students", "lessons", "attendance", "payments", "homework", "feedback"];
   const channel = supabaseClient.channel("crm-changes");
@@ -90,7 +83,7 @@ function subscribeToRealtimeUpdates(onChange) {
   channel.subscribe();
 }
 
-// ---------- ЗАПИСЬ: продление абонемента + новая оплата ----------
+// ---------- ЗАПИСЬ ДАННЫХ ----------
 async function dbRenewSubscription(studentId, lessons, amount) {
   const student = DB.students.find(s => s.id === studentId);
   const newTotal = student.subscriptionUsed + lessons;
@@ -112,14 +105,11 @@ async function dbRenewSubscription(studentId, lessons, amount) {
     amount,
     lessons,
   });
-
   await loadAllFromSupabase();
 }
 
-// ---------- ЗАПИСЬ: отметка посещаемости ----------
 async function dbMarkAttendance(lessonId, studentId, status) {
   const current = DB.attendance[lessonId] && DB.attendance[lessonId][studentId];
-
   if (current === status) {
     await supabaseClient.from("attendance").delete()
       .eq("lesson_id", lessonId).eq("student_id", studentId);
@@ -127,7 +117,7 @@ async function dbMarkAttendance(lessonId, studentId, status) {
     await supabaseClient.from("attendance").upsert({
       lesson_id: lessonId, student_id: studentId, status
     }, { onConflict: "lesson_id,student_id" });
-
+    
     if (status === "present" && current !== "present") {
       const s = DB.students.find(st => st.id === studentId);
       if (s) {
@@ -137,12 +127,10 @@ async function dbMarkAttendance(lessonId, studentId, status) {
       }
     }
   }
-
   await supabaseClient.from("lessons").update({ status: "completed" }).eq("id", lessonId);
   await loadAllFromSupabase();
 }
 
-// ---------- ЗАПИСЬ: новое занятие ----------
 async function dbAddLesson(groupId, date, topic) {
   await supabaseClient.from("lessons").insert({
     id: "l" + Date.now(), group_id: groupId, date, topic, status: "upcoming"
@@ -150,7 +138,6 @@ async function dbAddLesson(groupId, date, topic) {
   await loadAllFromSupabase();
 }
 
-// ---------- ЗАПИСЬ: новое домашнее задание ----------
 async function dbAddHomework(studentId, groupId, text) {
   const today = new Date().toISOString().slice(0, 10);
   await supabaseClient.from("homework").insert({
@@ -160,7 +147,6 @@ async function dbAddHomework(studentId, groupId, text) {
   await loadAllFromSupabase();
 }
 
-// ---------- ЗАПИСЬ: новый фидбэк ----------
 async function dbAddFeedback(studentId, teacherId, text) {
   const today = new Date().toISOString().slice(0, 10);
   await supabaseClient.from("feedback").insert({
