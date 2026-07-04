@@ -61,9 +61,16 @@ async function loadAllFromSupabase() {
     lastPaymentDate: s.last_payment_date,
     nextPaymentDate: s.next_payment_date,
     paymentAmount: s.payment_amount,
+    parentPhone: s.parent_phone,
+    parentEmail: s.parent_email,
     bindCode: s.bind_code,
   }));
-  DB.lessons = (lessonsRes.data || []).map(l => ({ ...l, groupId: l.group_id }));
+  DB.lessons = (lessonsRes.data || []).map(l => ({
+    ...l,
+    groupId: l.group_id,
+    materials: l.materials,
+    teacherComment: l.teacher_comment,
+  }));
   DB.attendance = attendanceObj;
   DB.payments = paymentsRes.data || [];
   DB.homework = (homeworkRes.data || []).map(h => ({ ...h, studentId: h.student_id, groupId: h.group_id }));
@@ -106,7 +113,6 @@ async function dbRenewSubscription(studentId, lessons, amount) {
   await loadAllFromSupabase();
 }
 
-// ===== ОТМЕТКА ПОСЕЩАЕМОСТИ + TELEGRAM =====
 async function dbMarkAttendance(lessonId, studentId, status) {
   const current = DB.attendance[lessonId] && DB.attendance[lessonId][studentId];
   if (current === status) {
@@ -129,7 +135,6 @@ async function dbMarkAttendance(lessonId, studentId, status) {
   await supabaseClient.from("lessons").update({ status: "completed" }).eq("id", lessonId);
   await loadAllFromSupabase();
 
-  // 🔔 Уведомление в Telegram (в фоне, не блокирует UI)
   try {
     fetch('/api/telegram-webhook', {
       method: 'POST',
@@ -141,14 +146,19 @@ async function dbMarkAttendance(lessonId, studentId, status) {
   }
 }
 
-async function dbAddLesson(groupId, date, topic) {
+async function dbAddLesson(groupId, date, topic, materials, teacherComment) {
   await supabaseClient.from("lessons").insert({
-    id: "l" + Date.now(), group_id: groupId, date, topic, status: "upcoming"
+    id: "l" + Date.now(),
+    group_id: groupId,
+    date,
+    topic,
+    status: "upcoming",
+    materials: materials || null,
+    teacher_comment: teacherComment || null,
   });
   await loadAllFromSupabase();
 }
 
-// ===== ДОБАВЛЕНИЕ ДЗ + TELEGRAM =====
 async function dbAddHomework(studentId, groupId, text) {
   const today = new Date().toISOString().slice(0, 10);
   const result = await supabaseClient.from("homework").insert({
@@ -157,7 +167,6 @@ async function dbAddHomework(studentId, groupId, text) {
   }).select();
   await loadAllFromSupabase();
 
-  // 🔔 Уведомление о новом ДЗ в Telegram
   const hwId = result?.data?.[0]?.id;
   if (hwId) {
     try {
@@ -180,8 +189,7 @@ async function dbAddFeedback(studentId, teacherId, text) {
   await loadAllFromSupabase();
 }
 
-// ===== ДОБАВЛЕНИЕ УЧЕНИКА =====
-async function dbAddStudent({ name, age, groupId, parentName, lessons, amount }) {
+async function dbAddStudent({ name, age, groupId, parentName, parentPhone, parentEmail, lessons, amount }) {
   const studentId = "s" + Date.now();
   const today = new Date().toISOString().slice(0, 10);
   const next = new Date();
@@ -195,6 +203,8 @@ async function dbAddStudent({ name, age, groupId, parentName, lessons, amount })
     subscription_used: 0, last_payment_date: today,
     next_payment_date: nextStr, payment_amount: parseInt(amount),
     notes: "", bind_code: bindCode,
+    parent_phone: parentPhone || null,
+    parent_email: parentEmail || null,
   });
 
   const parentLogin = "parent_" + studentId;
@@ -235,5 +245,40 @@ async function dbAddGroup({ name, teacherId, schedule, level }) {
   await supabaseClient.from("groups").insert({
     id: "g" + Date.now(), name, teacher_id: teacherId, schedule, level,
   });
+  await loadAllFromSupabase();
+}
+
+// 🔔 РУЧНОЕ УВЕДОМЛЕНИЕ РОДИТЕЛЮ (через Telegram)
+async function dbSendManualNotification(studentId, message) {
+  const result = await supabaseClient.from("students")
+    .select("parent_login")
+    .eq("id", studentId)
+    .single();
+  
+  if (!result?.data?.parent_login) {
+    throw new Error("Ученик не привязан к родителю");
+  }
+
+  // Сохраняем в БД как запись уведомления
+  await supabaseClient.from("feedback").insert({
+    id: "n" + Date.now(),
+    student_id: studentId,
+    teacher_id: "system",
+    date: new Date().toISOString().slice(0, 10),
+    text: "[УВЕДОМЛЕНИЕ РОДИТЕЛЮ] " + message,
+  });
+
+  // Отправляем через Telegram webhook
+  const response = await fetch('/api/telegram-webhook', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'manual_notify', studentId, message }),
+  });
+  
+  const data = await response.json();
+  if (!data.ok) {
+    throw new Error(data.error || "Родитель не привязан к Telegram");
+  }
+  
   await loadAllFromSupabase();
 }
