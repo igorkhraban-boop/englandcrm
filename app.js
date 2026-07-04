@@ -55,18 +55,18 @@ async function doLogin() {
   const login = document.getElementById("login-input").value.trim().toLowerCase();
   const password = document.getElementById("password-input").value;
   const errEl = document.getElementById("login-error");
-  
+
   if (!dataLoaded) {
     showToast("Подождите, идёт загрузка...");
     await dbReady;
   }
-  
+
   const user = DB.users[login];
   if (!user || user.password !== password) {
     errEl.style.display = "block";
     return;
   }
-  
+
   errEl.style.display = "none";
   currentUser = { ...user, login };
   sessionStorage.setItem("england_crm_session", JSON.stringify(currentUser));
@@ -112,19 +112,19 @@ function defaultTabForRole(role) {
 const NAV_CONFIG = {
   owner: [
     { id: "dashboard", label: "Главная", icon: "☉" },
-    { id: "students", label: "Ученики", icon: "👤" },
+    { id: "students", label: "Ученики", icon: "" },
     { id: "groups", label: "Группы", icon: "👥" },
     { id: "payments", label: "Оплаты", icon: "₽" },
   ],
   admin: [
-    { id: "dashboard", label: "Главная", icon: "☉" },
+    { id: "dashboard", label: "Главная", icon: "" },
     { id: "students", label: "Ученики", icon: "👤" },
     { id: "groups", label: "Группы", icon: "👥" },
     { id: "payments", label: "Оплаты", icon: "₽" },
   ],
   teacher: [
-    { id: "groups", label: "Мои группы", icon: "👥" },
-    { id: "homework", label: "ДЗ", icon: "📝" },
+    { id: "groups", label: "Мои группы", icon: "" },
+    { id: "homework", label: "ДЗ", icon: "" },
     { id: "feedback", label: "Фидбэк", icon: "💬" },
   ],
   parent: [
@@ -190,14 +190,13 @@ function daysUntil(dateStr) {
   return Math.round((target - today) / 86400000);
 }
 
-function remainingLessons(student) { 
+function remainingLessons(student) {
   return student.subscriptionTotal - student.subscriptionUsed;
 }
 
 function paymentStatusBadge(student) {
   const days = daysUntil(student.nextPaymentDate);
   const remaining = remainingLessons(student);
-  
   if (remaining <= 0) return { cls: "badge-danger", text: "Абонемент закончен" };
   if (days <= 3) return { cls: "badge-warn", text: `Оплата через ${days} дн.` };
   if (remaining <= 2) return { cls: "badge-warn", text: `Осталось ${remaining} зан.` };
@@ -220,7 +219,6 @@ function renderPage() {
     if (currentDetail.type === "student") { el.innerHTML = renderStudentDetail(currentDetail.id); return; }
     if (currentDetail.type === "group") { el.innerHTML = renderGroupDetail(currentDetail.id); return; }
   }
-  
   const role = currentUser.role;
   if ((role === "owner" || role === "admin") && currentTab === "dashboard") { el.innerHTML = renderDashboard(); return; }
   if (currentTab === "students") { el.innerHTML = renderStudentsList(); return; }
@@ -229,7 +227,6 @@ function renderPage() {
   if (currentTab === "homework") { el.innerHTML = renderHomeworkPage(); return; }
   if (currentTab === "feedback") { el.innerHTML = renderFeedbackPage(); return; }
   if (currentTab === "child") { el.innerHTML = renderChildPage(); return; }
-  
   el.innerHTML = `<div class="empty-state">Раздел не найден</div>`;
 }
 
@@ -237,11 +234,9 @@ function renderDashboard() {
   const totalStudents = DB.students.length;
   const totalGroups = DB.groups.length;
   const monthPrefix = getCurrentMonthPrefix();
-  
   const monthRevenue = DB.payments
     .filter(p => p.date.startsWith(monthPrefix))
     .reduce((sum, p) => sum + p.amount, 0);
-    
   const expiringCount = DB.students.filter(s => daysUntil(s.nextPaymentDate) <= 3 || remainingLessons(s) <= 0).length;
   const expiring = DB.students
     .filter(s => daysUntil(s.nextPaymentDate) <= 5 || remainingLessons(s) <= 2)
@@ -256,8 +251,8 @@ function renderDashboard() {
       <div class="stat-card"><div class="stat-value" style="color:${expiringCount > 0 ? 'var(--danger)' : 'var(--navy)'}">${expiringCount}</div><div class="stat-label">Истекает абонемент</div></div>
     </div>
     <div class="section-label">Требуют внимания</div>
-    ${expiring.length === 0 ? 
-      `<div class="empty-state"><div class="empty-state-icon">&#10003;</div>Все абонементы в порядке</div>` :
+    ${expiring.length === 0 ?
+      `<div class="empty-state"><div class="empty-state-icon">✓</div>Все абонементы в порядке</div>` :
       expiring.map(s => {
         const badge = paymentStatusBadge(s);
         return `
@@ -276,25 +271,25 @@ function renderDashboard() {
 function renderStudentsList() {
   const query = studentSearchQuery.toLowerCase().trim();
   let students = [...DB.students];
-  
   if (query) {
     students = students.filter(s => {
       const group = getGroup(s.groupId);
-      return s.name.toLowerCase().includes(query) || 
+      return s.name.toLowerCase().includes(query) ||
              (group && group.name.toLowerCase().includes(query));
     });
   }
-  
   students.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+  const canEdit = currentUser.role === "owner" || currentUser.role === "admin";
 
   return `
     <div class="page-title">Ученики</div>
-    <div style="margin-bottom: 16px;">
-      <input type="text" class="form-input" placeholder="🔍 Поиск по имени или группе..." 
-             value="${studentSearchQuery}" 
+    ${canEdit ? `<button class="btn-primary" onclick="openAddStudentModal()" style="margin-bottom:16px">+ Добавить ученика</button>` : ''}
+    <div style="margin-bottom:16px;">
+      <input type="text" class="form-input" placeholder=" Поиск по имени или группе..."
+             value="${studentSearchQuery}"
              oninput="studentSearchQuery = this.value; renderPage();">
     </div>
-    ${students.length === 0 ? 
+    ${students.length === 0 ?
       `<div class="empty-state">Ничего не найдено</div>` :
       students.map(s => {
         const badge = paymentStatusBadge(s);
@@ -315,12 +310,10 @@ function renderStudentsList() {
 function renderStudentDetail(id) {
   const s = getStudent(id);
   if (!s) return `<div class="empty-state">Ученик не найден</div>`;
-  
   const group = getGroup(s.groupId);
   const teacher = group ? getTeacher(group.teacherId) : null;
   const badge = paymentStatusBadge(s);
   const progressPct = Math.round((s.subscriptionUsed / s.subscriptionTotal) * 100);
-  
   const studentPayments = DB.payments.filter(p => p.studentId === id).sort((a, b) => b.date.localeCompare(a.date));
   const studentHomework = DB.homework.filter(h => h.studentId === id).sort((a, b) => b.date.localeCompare(a.date));
   const studentFeedback = DB.feedback.filter(f => f.studentId === id).sort((a, b) => b.date.localeCompare(a.date));
@@ -344,13 +337,16 @@ function renderStudentDetail(id) {
       <div style="font-size:12px;color:var(--text-muted)">Использовано ${s.subscriptionUsed} из ${s.subscriptionTotal} занятий</div>
       <div class="divider"></div>
       <div class="row-between" style="font-size:13px;margin-bottom:6px">
-        <span style="color:var(--text-secondary)">Преподаватель</span> <span style="font-weight:600">${teacher ? teacher.name : '—'}</span>
+        <span style="color:var(--text-secondary)">Преподаватель</span>
+        <span style="font-weight:600">${teacher ? teacher.name : '—'}</span>
       </div>
       <div class="row-between" style="font-size:13px;margin-bottom:6px">
-        <span style="color:var(--text-secondary)">Расписание</span> <span style="font-weight:600">${group ? group.schedule : '—'}</span>
+        <span style="color:var(--text-secondary)">Расписание</span>
+        <span style="font-weight:600">${group ? group.schedule : '—'}</span>
       </div>
       <div class="row-between" style="font-size:13px">
-        <span style="color:var(--text-secondary)">Следующая оплата</span> <span style="font-weight:600">${formatDate(s.nextPaymentDate)}</span>
+        <span style="color:var(--text-secondary)">Следующая оплата</span>
+        <span style="font-weight:600">${formatDate(s.nextPaymentDate)}</span>
       </div>
       ${canEdit ? `<button class="btn-primary" style="margin-top:14px" onclick="openRenewModal('${id}')">Продлить абонемент</button>` : ''}
     </div>
@@ -368,7 +364,7 @@ function renderStudentDetail(id) {
     ${studentFeedback.length === 0 ? `<div class="card"><div style="font-size:13px;color:var(--text-muted)">Фидбэка пока нет</div></div>` :
       studentFeedback.map(f => `
         <div class="card">
-          <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">${formatDate(f.date)} &middot; ${getTeacher(f.teacherId)?.name || ''}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">${formatDate(f.date)} · ${getTeacher(f.teacherId)?.name || ''}</div>
           <div style="font-size:14px;line-height:1.5">${f.text}</div>
         </div>
       `).join("")
@@ -378,7 +374,7 @@ function renderStudentDetail(id) {
       studentPayments.map(p => `
         <div class="list-item" style="cursor:default">
           <div class="list-item-main">
-            <div class="list-item-title">${p.amount.toLocaleString('ru-RU')} &#8381;</div>
+            <div class="list-item-title">${p.amount.toLocaleString('ru-RU')} ₽</div>
             <div class="list-item-sub">${p.lessons} занятий</div>
           </div>
           <div class="list-item-right" style="font-size:13px;color:var(--text-secondary)">${formatDate(p.date)}</div>
@@ -395,7 +391,7 @@ function openRenewModal(studentId) {
     <div class="modal-title">Продлить абонемент</div>
     <div class="form-group"><label class="form-label">Ученик</label><input class="form-input" value="${s.name}" disabled style="background:var(--bg)"></div>
     <div class="form-group"><label class="form-label">Количество занятий</label><input class="form-input" type="number" id="renew-lessons" value="8"></div>
-    <div class="form-group"><label class="form-label">Сумма оплаты (&#8381;)</label><input class="form-input" type="number" id="renew-amount" value="${s.paymentAmount}"></div>
+    <div class="form-group"><label class="form-label">Сумма оплаты (₽)</label><input class="form-input" type="number" id="renew-amount" value="${s.paymentAmount}"></div>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="closeModal()">Отмена</button>
       <button class="btn-primary flex" onclick="confirmRenew('${studentId}')">Подтвердить</button>
@@ -425,11 +421,18 @@ function closeModal() {
 
 function renderGroupsList() {
   let groups = DB.groups;
+  const canEdit = currentUser.role === "owner" || currentUser.role === "admin";
   if (currentUser.role === "teacher") {
     groups = DB.groups.filter(g => g.teacherId === currentUser.id);
   }
   return `
     <div class="page-title">${currentUser.role === 'teacher' ? 'Мои группы' : 'Группы'}</div>
+    ${canEdit ? `
+      <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <button class="btn-primary" onclick="openAddGroupModal()" style="flex:1">+ Добавить группу</button>
+        <button class="btn-secondary" onclick="openAddTeacherModal()" style="flex:1">+ Добавить учителя</button>
+      </div>
+    ` : ''}
     ${groups.map(g => {
       const teacher = getTeacher(g.teacherId);
       const studentCount = DB.students.filter(s => s.groupId === g.id).length;
@@ -484,8 +487,8 @@ function renderGroupDetail(id) {
                 const att = DB.attendance[l.id] && DB.attendance[l.id][s.id];
                 return `
                   <div class="lesson-row">
-                    <div class="check-circle ${att === 'present' ? 'done' : ''}" onclick="markAttendance('${l.id}','${s.id}','present')">${att === 'present' ? '&#10003;' : ''}</div>
-                    <div class="check-circle absent ${att === 'absent' ? 'absent' : ''}" onclick="markAttendance('${l.id}','${s.id}','absent')">${att === 'absent' ? '&times;' : ''}</div>
+                    <div class="check-circle ${att === 'present' ? 'done' : ''}" onclick="markAttendance('${l.id}','${s.id}','present')">${att === 'present' ? '✓' : ''}</div>
+                    <div class="check-circle absent ${att === 'absent' ? 'absent' : ''}" onclick="markAttendance('${l.id}','${s.id}','absent')">${att === 'absent' ? '×' : ''}</div>
                     <div style="font-size:13px;flex:1">${s.name}</div>
                   </div>`;
               }).join("")}
@@ -541,7 +544,6 @@ async function confirmAddLesson(groupId) {
 
 function renderPaymentsPage() {
   if (currentUser.role === "parent") return renderParentPayments();
-  
   const allPayments = [...DB.payments].sort((a, b) => b.date.localeCompare(a.date));
   const monthPrefix = getCurrentMonthPrefix();
   const monthTotal = DB.payments.filter(p => p.date.startsWith(monthPrefix)).reduce((s, p) => s + p.amount, 0);
@@ -549,16 +551,16 @@ function renderPaymentsPage() {
 
   return `
     <div class="page-title">Оплаты</div>
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-      <div style="font-size:14px; color:var(--text-secondary);">Всего оплат: ${allPayments.length}</div>
-      <button class="btn-secondary" onclick="exportPaymentsToCSV()" style="padding:8px 12px; font-size:13px;"> Экспорт в CSV</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <div style="font-size:14px;color:var(--text-secondary);">Всего оплат: ${allPayments.length}</div>
+      <button class="btn-secondary" onclick="exportPaymentsToCSV()" style="padding:8px 12px;font-size:13px;"> Экспорт в CSV</button>
     </div>
     <div class="stats-grid">
       <div class="stat-card"><div class="stat-value">${monthTotal.toLocaleString('ru-RU')} ₽</div><div class="stat-label">Поступления за ${getCurrentMonthName()}</div></div>
       <div class="stat-card"><div class="stat-value" style="color:${expiring.length ? 'var(--danger)' : 'var(--navy)'}">${expiring.length}</div><div class="stat-label">Нужно продлить</div></div>
     </div>
     <div class="section-label">Нужно продлить абонемент</div>
-    ${expiring.length === 0 ? `<div class="empty-state" style="padding:20px"><div class="empty-state-icon">&#10003;</div>Все оплачено</div>` :
+    ${expiring.length === 0 ? `<div class="empty-state" style="padding:20px"><div class="empty-state-icon">✓</div>Все оплачено</div>` :
       expiring.map(s => {
         const badge = paymentStatusBadge(s);
         return `
@@ -581,7 +583,7 @@ function renderPaymentsPage() {
             <div class="list-item-sub">${p.lessons} занятий</div>
           </div>
           <div class="list-item-right">
-            <div style="font-weight:700">${p.amount.toLocaleString('ru-RU')} &#8381;</div>
+            <div style="font-weight:700">${p.amount.toLocaleString('ru-RU')} ₽</div>
             <div style="font-size:11px;color:var(--text-muted)">${formatDate(p.date)}</div>
           </div>
         </div>`;
@@ -595,14 +597,12 @@ function exportPaymentsToCSV() {
     showToast("Нет оплат для экспорта");
     return;
   }
-  
   let csv = "Дата;Ученик;Сумма (₽);Кол-во занятий\n";
   payments.forEach(p => {
     const student = getStudent(p.studentId);
     const name = student ? student.name.replace(/;/g, ',') : 'Неизвестный';
     csv += `${p.date};${name};${p.amount};${p.lessons}\n`;
   });
-
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -640,7 +640,7 @@ function renderParentPayments() {
       ${payments.map(p => `
         <div class="list-item" style="cursor:default">
           <div class="list-item-main">
-            <div class="list-item-title">${p.amount.toLocaleString('ru-RU')} &#8381;</div>
+            <div class="list-item-title">${p.amount.toLocaleString('ru-RU')} ₽</div>
             <div class="list-item-sub">${p.lessons} занятий</div>
           </div>
           <div class="list-item-right" style="font-size:13px;color:var(--text-secondary)">${formatDate(p.date)}</div>
@@ -663,7 +663,7 @@ function renderTeacherHomework() {
     <div class="page-title">Домашние задания</div>
     <button class="btn-primary" onclick="openAddHomeworkModal()">+ Задать ДЗ</button>
     <div style="height:14px"></div>
-    ${myHomework.length === 0 ? `<div class="empty-state">Заданий пока нет</div>` : 
+    ${myHomework.length === 0 ? `<div class="empty-state">Заданий пока нет</div>` :
       myHomework.map(hw => {
         const s = getStudent(hw.studentId);
         return `
@@ -725,7 +725,7 @@ function renderParentHomework() {
   const homework = DB.homework.filter(h => ids.includes(h.studentId)).sort((a, b) => b.date.localeCompare(a.date));
   return `
     <div class="page-title">Домашние задания</div>
-    ${homework.length === 0 ? `<div class="empty-state">Заданий пока нет</div>` : 
+    ${homework.length === 0 ? `<div class="empty-state">Заданий пока нет</div>` :
       homework.map(hw => {
         const s = getStudent(hw.studentId);
         return `
@@ -748,7 +748,7 @@ function renderFeedbackPage() {
     <div class="page-title">Фидбэк ученикам</div>
     <button class="btn-primary" onclick="openAddFeedbackModal()">+ Оставить фидбэк</button>
     <div style="height:14px"></div>
-    ${myFeedback.length === 0 ? `<div class="empty-state">Фидбэка пока нет</div>` : 
+    ${myFeedback.length === 0 ? `<div class="empty-state">Фидбэка пока нет</div>` :
       myFeedback.map(f => {
         const s = getStudent(f.studentId);
         return `
@@ -829,10 +829,12 @@ function renderChildPage() {
         <div style="font-size:12px;color:var(--text-muted)">Использовано ${s.subscriptionUsed} из ${s.subscriptionTotal} занятий</div>
         <div class="divider"></div>
         <div class="row-between" style="font-size:13px;margin-bottom:6px">
-          <span style="color:var(--text-secondary)">Преподаватель</span> <span style="font-weight:600">${teacher ? teacher.name : '—'}</span>
+          <span style="color:var(--text-secondary)">Преподаватель</span>
+          <span style="font-weight:600">${teacher ? teacher.name : '—'}</span>
         </div>
         <div class="row-between" style="font-size:13px">
-          <span style="color:var(--text-secondary)">Расписание</span> <span style="font-weight:600">${group ? group.schedule : '—'}</span>
+          <span style="color:var(--text-secondary)">Расписание</span>
+          <span style="font-weight:600">${group ? group.schedule : '—'}</span>
         </div>
       </div>
       <div class="section-label">Фидбэк от преподавателя</div>
@@ -846,6 +848,117 @@ function renderChildPage() {
       }
     `;
   }).join("<div style='height:24px'></div>");
+}
+
+// ========== ДОБАВЛЕНИЕ УЧЕНИКА ==========
+function openAddStudentModal() {
+  const groups = DB.groups;
+  const sheet = document.getElementById("modal-sheet");
+  sheet.innerHTML = `
+    <div class="modal-title">Новый ученик</div>
+    <div class="form-group"><label class="form-label">ФИО ученика</label><input class="form-input" id="st-name" placeholder="Иванов Иван"></div>
+    <div class="form-group"><label class="form-label">Возраст</label><input class="form-input" type="number" id="st-age" value="10"></div>
+    <div class="form-group"><label class="form-label">Группа</label><select class="form-input" id="st-group">${groups.map(g => `<option value="${g.id}">${g.name} (${g.schedule})</option>`).join("")}</select></div>
+    <div class="divider"></div>
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">Данные родителя (создаётся автоматически)</div>
+    <div class="form-group"><label class="form-label">ФИО родителя</label><input class="form-input" id="st-parent" placeholder="Иванова Мария"></div>
+    <div class="form-group"><label class="form-label">Кол-во занятий в абонементе</label><input class="form-input" type="number" id="st-lessons" value="8"></div>
+    <div class="form-group"><label class="form-label">Сумма оплаты (₽)</label><input class="form-input" type="number" id="st-amount" value="4000"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal()">Отмена</button>
+      <button class="btn-primary flex" onclick="confirmAddStudent()">Создать</button>
+    </div>
+  `;
+  document.getElementById("modal-overlay").classList.add("open");
+}
+
+async function confirmAddStudent() {
+  const name = document.getElementById("st-name").value.trim();
+  const age = document.getElementById("st-age").value;
+  const groupId = document.getElementById("st-group").value;
+  const parentName = document.getElementById("st-parent").value.trim();
+  const lessons = document.getElementById("st-lessons").value;
+  const amount = document.getElementById("st-amount").value;
+  if (!name || !parentName) { showToast("Заполните имя ученика и родителя"); return; }
+  closeModal();
+  showToast("Создаём ученика...");
+  try {
+    const result = await dbAddStudent({ name, age, groupId, parentName, lessons, amount });
+    showToast(`Ученик добавлен! Логин родителя: ${result.parentLogin}, пароль: ${result.parentPassword}`);
+    renderPage();
+  } catch (e) {
+    console.error(e);
+    showToast("Ошибка: " + e.message);
+  }
+}
+
+// ========== ДОБАВЛЕНИЕ УЧИТЕЛЯ ==========
+function openAddTeacherModal() {
+  const sheet = document.getElementById("modal-sheet");
+  sheet.innerHTML = `
+    <div class="modal-title">Новый учитель</div>
+    <div class="form-group"><label class="form-label">ФИО учителя</label><input class="form-input" id="t-name" placeholder="Петрова Анна Сергеевна"></div>
+    <div class="form-group"><label class="form-label">Логин для входа</label><input class="form-input" id="t-login" placeholder="petrova"></div>
+    <div class="form-group"><label class="form-label">Пароль</label><input class="form-input" id="t-password" value="teacher123"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal()">Отмена</button>
+      <button class="btn-primary flex" onclick="confirmAddTeacher()">Создать</button>
+    </div>
+  `;
+  document.getElementById("modal-overlay").classList.add("open");
+}
+
+async function confirmAddTeacher() {
+  const name = document.getElementById("t-name").value.trim();
+  const login = document.getElementById("t-login").value.trim();
+  const password = document.getElementById("t-password").value;
+  if (!name || !login) { showToast("Заполните имя и логин"); return; }
+  closeModal();
+  showToast("Создаём учителя...");
+  try {
+    await dbAddTeacher({ name, login, password });
+    showToast(`Учитель добавлен! Логин: ${login}, пароль: ${password}`);
+    renderPage();
+  } catch (e) {
+    console.error(e);
+    showToast("Ошибка: " + e.message);
+  }
+}
+
+// ========== ДОБАВЛЕНИЕ ГРУППЫ ==========
+function openAddGroupModal() {
+  const teachers = DB.teachers;
+  const sheet = document.getElementById("modal-sheet");
+  sheet.innerHTML = `
+    <div class="modal-title">Новая группа</div>
+    <div class="form-group"><label class="form-label">Название группы</label><input class="form-input" id="gr-name" placeholder="Beginners Mon-Wed"></div>
+    <div class="form-group"><label class="form-label">Преподаватель</label><select class="form-input" id="gr-teacher">${teachers.map(t => `<option value="${t.id}">${t.name}</option>`).join("")}</select></div>
+    <div class="form-group"><label class="form-label">Расписание</label><input class="form-input" id="gr-schedule" placeholder="Пн/Ср/Пт 16:00"></div>
+    <div class="form-group"><label class="form-label">Уровень</label><input class="form-input" id="gr-level" placeholder="A1 Beginner"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal()">Отмена</button>
+      <button class="btn-primary flex" onclick="confirmAddGroup()">Создать</button>
+    </div>
+  `;
+  document.getElementById("modal-overlay").classList.add("open");
+}
+
+async function confirmAddGroup() {
+  const name = document.getElementById("gr-name").value.trim();
+  const teacherId = document.getElementById("gr-teacher").value;
+  const schedule = document.getElementById("gr-schedule").value.trim();
+  const level = document.getElementById("gr-level").value.trim();
+  if (!name || !schedule) { showToast("Заполните название и расписание"); return; }
+  closeModal();
+  showToast("Создаём группу...");
+  try {
+    await dbAddGroup({ name, teacherId, schedule, level });
+    showToast("Группа создана!");
+    renderPage();
+  } catch (e) {
+    console.error(e);
+    showToast("Ошибка: " + e.message);
+  }
 }
 
 document.getElementById("password-input").addEventListener("keydown", e => {
