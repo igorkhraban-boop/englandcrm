@@ -1,12 +1,16 @@
-// ===== EngLand CRM — Telegram Webhook (Vercel Serverless Function) =====
-// Обрабатывает команды от бота и отправляет уведомления родителям
+// ===== EngLand CRM — Telegram Webhook (Vercel Serverless) =====
+// Работает БЕЗ npm-пакетов, только через fetch
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const BOT_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
 
-// Вспомогательная функция: отправить сообщение
-async function sendMessage(chatId, text) {
-  const res = await fetch(`${BOT_API}/sendMessage`, {
+// ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
+
+// Отправка сообщения в Telegram
+async function sendTelegramMessage(chatId, text) {
+  const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -16,32 +20,61 @@ async function sendMessage(chatId, text) {
     }),
   });
   const data = await res.json();
-  if (!data.ok) console.error('Telegram error:', data);
+  console.log('Telegram response:', data);
   return data.ok;
 }
 
-// Вспомогательная функция: подключиться к Supabase напрямую
-async function getSupabase() {
-  const { createClient } = await import('@supabase/supabase-js');
-  return createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_ANON_KEY
-  );
+// Запрос к Supabase REST API
+async function supabaseQuery(table, params = '') {
+  const url = `${SUPABASE_URL}/rest/v1/${table}${params}`;
+  const res = await fetch(url, {
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    console.error('Supabase error:', err);
+    throw new Error(`Supabase ${table}: ${err}`);
+  }
+  return res.json();
+}
+
+// Обновление в Supabase
+async function supabaseUpdate(table, body, params) {
+  const url = `${SUPABASE_URL}/rest/v1/${table}${params}`;
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    console.error('Supabase update error:', err);
+  }
 }
 
 // ===== ОБРАБОТКА КОМАНД ОТ БОТА =====
 async function handleCommand(update) {
   const message = update.message;
   if (!message) return;
-  
-  const chatId = message.chat.id;
-  const text = message.text || '';
-  const supabase = await getSupabase();
 
-  // Команда /start
+  const chatId = message.chat.id;
+  const text = (message.text || '').trim();
+
+  console.log('Command from chat', chatId, ':', text);
+
+  // /start
   if (text === '/start') {
-    await sendMessage(chatId, 
-      ' Привет! Я бот языковой школы EngLand.\n\n' +
+    await sendTelegramMessage(chatId,
+      '👋 Привет! Я бот языковой школы EngLand.\n\n' +
       'Чтобы привязать аккаунт, напишите:\n' +
       '/bind КОД\n\n' +
       'КОД — это 6-значный код из карточки ребёнка в приложении EngLand.'
@@ -49,62 +82,49 @@ async function handleCommand(update) {
     return;
   }
 
-  // Команда /bind КОД
+  // /bind КОД
   if (text.startsWith('/bind ')) {
     const code = text.split(' ')[1]?.trim();
     if (!code || code.length !== 6) {
-      await sendMessage(chatId, '❌ Неверный формат. Напишите /bind и 6-значный код.');
+      await sendTelegramMessage(chatId, '❌ Неверный формат. Напишите /bind и 6-значный код.');
       return;
     }
 
-    // Ищем ученика по коду
-    const { data: student } = await supabase
-      .from('students')
-      .select('*, parent_login')
-      .eq('bind_code', code)
-      .single();
+    // Ищем ученика по bind_code
+    const students = await supabaseQuery('students', `?select=id,name,parent_login&bind_code=eq.${code}`);
+    const student = students[0];
 
     if (!student) {
-      await sendMessage(chatId, '❌ Ученик с таким кодом не найден. Проверьте код в приложении.');
+      await sendTelegramMessage(chatId, '❌ Ученик с таким кодом не найден. Проверьте код в приложении.');
       return;
     }
 
     // Сохраняем chat_id в таблицу users
-    const { error } = await supabase
-      .from('users')
-      .update({ telegram_chat_id: String(chatId) })
-      .eq('login', student.parent_login);
+    await supabaseUpdate('users',
+      { telegram_chat_id: String(chatId) },
+      `?login=eq.${student.parent_login}`
+    );
 
-    if (error) {
-      await sendMessage(chatId, ' Ошибка привязки. Попробуйте позже.');
-      return;
-    }
-
-    await sendMessage(chatId, 
+    await sendTelegramMessage(chatId,
       `✅ Привязка успешна!\n\n` +
-      `Вы будете получать уведомления о занятиях ${student.name}.\n\n` +
+      `Вы будете получать уведомления о занятиях <b>${student.name}</b>.\n\n` +
       `Команды:\n/status — статус абонемента\n/help — помощь`
     );
     return;
   }
 
-  // Команда /status
+  // /status
   if (text === '/status') {
-    const { data: user } = await supabase
-      .from('users')
-      .select('student_ids')
-      .eq('telegram_chat_id', String(chatId))
-      .single();
+    const users = await supabaseQuery('users', `?select=student_ids&telegram_chat_id=eq.${chatId}`);
+    const user = users[0];
 
-    if (!user) {
-      await sendMessage(chatId, '⚠️ Аккаунт не привязан. Напишите /bind КОД');
+    if (!user || !user.student_ids || user.student_ids.length === 0) {
+      await sendTelegramMessage(chatId, '⚠️ Аккаунт не привязан. Напишите /bind КОД');
       return;
     }
 
-    const { data: students } = await supabase
-      .from('students')
-      .select('name, subscription_total, subscription_used, next_payment_date')
-      .in('id', user.student_ids);
+    const ids = user.student_ids.map(id => `id=eq.${id}`).join('&or=');
+    const students = await supabaseQuery('students', `?select=name,subscription_total,subscription_used,next_payment_date&${ids}`);
 
     let msg = '📊 <b>Статус абонементов:</b>\n\n';
     students.forEach(s => {
@@ -115,13 +135,13 @@ async function handleCommand(update) {
       msg += `   Следующая оплата: через ${days} дн.\n\n`;
     });
 
-    await sendMessage(chatId, msg);
+    await sendTelegramMessage(chatId, msg);
     return;
   }
 
-  // Команда /help
+  // /help
   if (text === '/help') {
-    await sendMessage(chatId,
+    await sendTelegramMessage(chatId,
       '📚 <b>Команды бота EngLand:</b>\n\n' +
       '/start — приветствие\n' +
       '/bind КОД — привязать аккаунт\n' +
@@ -130,115 +150,88 @@ async function handleCommand(update) {
     );
     return;
   }
+
+  // Неизвестная команда
+  await sendTelegramMessage(chatId, 'Неизвестная команда. Напишите /help для списка команд.');
 }
 
-// ===== ОТПРАВКА УВЕДОМЛЕНИЯ (вызывается из CRM) =====
-async function sendNotification(req) {
-  const { action, studentId, lessonId, homeworkId } = req.body || {};
-  const supabase = await getSupabase();
+// ===== ОТПРАВКА УВЕДОМЛЕНИЯ О ПОСЕЩАЕМОСТИ =====
+async function sendAttendanceNotification(studentId, lessonId) {
+  console.log('Sending attendance notification:', studentId, lessonId);
 
-  if (action === 'attendance') {
-    // Уведомление о посещаемости
-    const { data: student } = await supabase
-      .from('students')
-      .select('*, parent_login, group_id')
-      .eq('id', studentId)
-      .single();
+  // Получаем данные ученика
+  const students = await supabaseQuery('students', `?select=*,parent_login,group_id&id=eq.${studentId}`);
+  const student = students[0];
+  if (!student) { console.error('Student not found'); return { ok: false }; }
 
-    if (!student) return { ok: false, error: 'student not found' };
-
-    const { data: user } = await supabase
-      .from('users')
-      .select('telegram_chat_id')
-      .eq('login', student.parent_login)
-      .single();
-
-    if (!user?.telegram_chat_id) {
-      return { ok: false, error: 'parent not bound' };
-    }
-
-    const { data: group } = await supabase
-      .from('groups')
-      .select('name')
-      .eq('id', student.group_id)
-      .single();
-
-    const { data: lesson } = await supabase
-      .from('lessons')
-      .select('topic, date')
-      .eq('id', lessonId)
-      .single();
-
-    const { data: attendance } = await supabase
-      .from('attendance')
-      .select('status')
-      .eq('lesson_id', lessonId)
-      .eq('student_id', studentId)
-      .single();
-
-    const statusText = attendance?.status === 'present' ? '✅ была' : '❌ отсутствовала';
-    const dateStr = new Date(lesson?.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
-
-    // Ищем последнее ДЗ для этого ученика
-    const { data: hw } = await supabase
-      .from('homework')
-      .select('text')
-      .eq('student_id', studentId)
-      .order('date', { ascending: false })
-      .limit(1)
-      .single();
-
-    const hwText = hw?.text ? `\n\n📝 <b>Домашнее задание:</b>\n${hw.text}` : '';
-
-    const msg = 
-      `📚 <b>Занятие ${dateStr}</b>\n\n` +
-      `${student.name} ${statusText} на занятии группы "${group?.name}".\n` +
-      `Тема: ${lesson?.topic || 'не указана'}${hwText}`;
-
-    const ok = await sendMessage(user.telegram_chat_id, msg);
-    return { ok };
+  // Получаем chat_id родителя
+  const users = await supabaseQuery('users', `?select=telegram_chat_id&login=eq.${student.parent_login}`);
+  const user = users[0];
+  if (!user?.telegram_chat_id) {
+    console.log('Parent not bound to Telegram');
+    return { ok: false, error: 'not_bound' };
   }
 
-  if (action === 'homework') {
-    // Уведомление о новом ДЗ
-    const { data: hw } = await supabase
-      .from('homework')
-      .select('*, student_id')
-      .eq('id', homeworkId)
-      .single();
+  // Получаем данные группы
+  const groups = await supabaseQuery('groups', `?select=name&id=eq.${student.group_id}`);
+  const group = groups[0];
 
-    if (!hw) return { ok: false, error: 'hw not found' };
+  // Получаем данные занятия
+  const lessons = await supabaseQuery('lessons', `?select=topic,date&id=eq.${lessonId}`);
+  const lesson = lessons[0];
 
-    const { data: student } = await supabase
-      .from('students')
-      .select('name, parent_login')
-      .eq('id', hw.student_id)
-      .single();
+  // Получаем статус посещаемости
+  const attendance = await supabaseQuery('attendance', `?select=status&lesson_id=eq.${lessonId}&student_id=eq.${studentId}`);
+  const status = attendance[0]?.status;
 
-    if (!student) return { ok: false, error: 'student not found' };
+  // Ищем последнее ДЗ
+  const homework = await supabaseQuery('homework', `?select=text&student_id=eq.${studentId}&order=date.desc&limit=1`);
+  const hw = homework[0];
 
-    const { data: user } = await supabase
-      .from('users')
-      .select('telegram_chat_id')
-      .eq('login', student.parent_login)
-      .single();
+  const statusText = status === 'present' ? '✅ была' : '❌ отсутствовала';
+  const dateStr = lesson?.date ? new Date(lesson.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) : '';
 
-    if (!user?.telegram_chat_id) return { ok: false, error: 'not bound' };
+  let msg = `📚 <b>Занятие ${dateStr}</b>\n\n`;
+  msg += `${student.name} ${statusText} на занятии группы "${group?.name || ''}".\n`;
+  msg += `Тема: ${lesson?.topic || 'не указана'}`;
+  if (hw?.text) msg += `\n\n📝 <b>Домашнее задание:</b>\n${hw.text}`;
 
-    const msg = 
-      `📝 <b>Новое домашнее задание</b>\n\n` +
-      `${student.name}, вот твоё задание:\n\n${hw.text}`;
-
-    const ok = await sendMessage(user.telegram_chat_id, msg);
-    return { ok };
-  }
-
-  return { ok: false, error: 'unknown action' };
+  const ok = await sendTelegramMessage(user.telegram_chat_id, msg);
+  return { ok };
 }
 
-// ===== ГЛАВНЫЙ ОБРАБОТЧИК (Vercel Serverless Function) =====
+// ===== ОТПРАВКА УВЕДОМЛЕНИЯ О ДЗ =====
+async function sendHomeworkNotification(homeworkId) {
+  console.log('Sending homework notification:', homeworkId);
+
+  const homeworkList = await supabaseQuery('homework', `?select=*&id=eq.${homeworkId}`);
+  const hw = homeworkList[0];
+  if (!hw) { console.error('Homework not found'); return { ok: false }; }
+
+  const students = await supabaseQuery('students', `?select=name,parent_login&id=eq.${hw.student_id}`);
+  const student = students[0];
+  if (!student) { console.error('Student not found'); return { ok: false }; }
+
+  const users = await supabaseQuery('users', `?select=telegram_chat_id&login=eq.${student.parent_login}`);
+  const user = users[0];
+  if (!user?.telegram_chat_id) {
+    console.log('Parent not bound to Telegram');
+    return { ok: false, error: 'not_bound' };
+  }
+
+  const msg = `📝 <b>Новое домашнее задание</b>\n\n${student.name}, вот твоё задание:\n\n${hw.text}`;
+  const ok = await sendTelegramMessage(user.telegram_chat_id, msg);
+  return { ok };
+}
+
+// ===== ГЛАВНЫЙ ОБРАБОТЧИК =====
 export default async function handler(req, res) {
-  // Разрешаем CORS только для своего домена
+  console.log('=== Webhook called ===');
+  console.log('Method:', req.method);
+  console.log('Has TELEGRAM_BOT_TOKEN:', !!BOT_TOKEN);
+  console.log('Has SUPABASE_URL:', !!SUPABASE_URL);
+
+  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -248,30 +241,52 @@ export default async function handler(req, res) {
     return;
   }
 
+  // Проверка переменных окружения
+  if (!BOT_TOKEN) {
+    console.error('TELEGRAM_BOT_TOKEN is missing!');
+    res.status(500).json({ error: 'Bot token not configured' });
+    return;
+  }
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    console.error('Supabase credentials missing!');
+    res.status(500).json({ error: 'Supabase not configured' });
+    return;
+  }
+
   try {
-    // Webhook от Telegram (GET или POST с update_id)
-    if (req.method === 'GET' || (req.method === 'POST' && req.body?.update_id)) {
-      const update = req.method === 'GET' 
-        ? JSON.parse(req.query.update || '{}')
-        : req.body;
-      
-      if (update.message) {
-        await handleCommand(update);
-      }
+    // Webhook от Telegram
+    if (req.method === 'POST' && req.body?.update_id) {
+      console.log('Telegram update received');
+      await handleCommand(req.body);
       res.status(200).json({ ok: true });
       return;
     }
 
-    // Вызов из CRM (POST с action)
+    // GET — проверка работоспособности
+    if (req.method === 'GET') {
+      res.status(200).json({ ok: true, message: 'Webhook is working' });
+      return;
+    }
+
+    // Вызов из CRM
     if (req.method === 'POST' && req.body?.action) {
-      const result = await sendNotification(req);
+      console.log('CRM action:', req.body.action);
+      let result;
+      if (req.body.action === 'attendance') {
+        result = await sendAttendanceNotification(req.body.studentId, req.body.lessonId);
+      } else if (req.body.action === 'homework') {
+        result = await sendHomeworkNotification(req.body.homeworkId);
+      } else {
+        result = { ok: false, error: 'unknown action' };
+      }
       res.status(200).json(result);
       return;
     }
 
     res.status(400).json({ error: 'bad request' });
   } catch (e) {
+    console.error('=== Webhook ERROR ===');
     console.error(e);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: e.message, stack: e.stack });
   }
 }
