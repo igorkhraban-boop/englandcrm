@@ -114,7 +114,7 @@ async function dbMarkAttendance(lessonId, studentId, status) {
     await supabaseClient.from("attendance").upsert({
       lesson_id: lessonId, student_id: studentId, status
     }, { onConflict: "lesson_id,student_id" });
-    
+
     if (status === "present" && current !== "present") {
       const s = DB.students.find(st => st.id === studentId);
       if (s) {
@@ -148,6 +148,91 @@ async function dbAddFeedback(studentId, teacherId, text) {
   const today = new Date().toISOString().slice(0, 10);
   await supabaseClient.from("feedback").insert({
     id: "f" + Date.now(), student_id: studentId, date: today, teacher_id: teacherId, text
+  });
+  await loadAllFromSupabase();
+}
+
+// ===== НОВОЕ: добавление ученика + родителя =====
+async function dbAddStudent({ name, age, groupId, parentName, lessons, amount }) {
+  const studentId = "s" + Date.now();
+  const today = new Date().toISOString().slice(0, 10);
+  const next = new Date();
+  next.setDate(next.getDate() + 30);
+  const nextStr = next.toISOString().slice(0, 10);
+
+  await supabaseClient.from("students").insert({
+    id: studentId,
+    name,
+    age: parseInt(age),
+    group_id: groupId,
+    parent_login: null,
+    subscription_total: parseInt(lessons),
+    subscription_used: 0,
+    last_payment_date: today,
+    next_payment_date: nextStr,
+    payment_amount: parseInt(amount),
+    notes: "",
+  });
+
+  const parentLogin = "parent_" + studentId;
+  const parentPassword = "123456";
+  await supabaseClient.from("users").insert({
+    login: parentLogin,
+    password: parentPassword,
+    role: "parent",
+    name: parentName,
+    teacher_id: null,
+    student_ids: [studentId],
+  });
+
+  await supabaseClient.from("students").update({
+    parent_login: parentLogin
+  }).eq("id", studentId);
+
+  await supabaseClient.from("payments").insert({
+    id: "pay" + Date.now(),
+    student_id: studentId,
+    date: today,
+    amount: parseInt(amount),
+    lessons: parseInt(lessons),
+  });
+
+  await loadAllFromSupabase();
+  return { parentLogin, parentPassword };
+}
+
+// ===== НОВОЕ: добавление учителя =====
+async function dbAddTeacher({ name, login, password }) {
+  const teacherId = "t" + Date.now();
+  const cleanLogin = login.toLowerCase().trim();
+
+  await supabaseClient.from("teachers").insert({
+    id: teacherId,
+    name,
+    email: null,
+    phone: null,
+  });
+
+  await supabaseClient.from("users").insert({
+    login: cleanLogin,
+    password,
+    role: "teacher",
+    name,
+    teacher_id: teacherId,
+    student_ids: [],
+  });
+
+  await loadAllFromSupabase();
+}
+
+// ===== НОВОЕ: добавление группы =====
+async function dbAddGroup({ name, teacherId, schedule, level }) {
+  await supabaseClient.from("groups").insert({
+    id: "g" + Date.now(),
+    name,
+    teacher_id: teacherId,
+    schedule,
+    level,
   });
   await loadAllFromSupabase();
 }
