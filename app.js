@@ -4,6 +4,8 @@ let currentTab = "dashboard";
 let currentDetail = null;
 let dataLoaded = false;
 let studentSearchQuery = "";
+let calendarView = "week";
+let calendarDate = new Date();
 
 function getCurrentMonthPrefix() {
   const now = new Date();
@@ -111,26 +113,30 @@ function defaultTabForRole(role) {
 
 const NAV_CONFIG = {
   owner: [
-    { id: "dashboard", label: "Главная", icon: "☉" },
-    { id: "students", label: "Ученики", icon: "" },
-    { id: "groups", label: "Группы", icon: "👥" },
-    { id: "payments", label: "Оплаты", icon: "₽" },
+    { id: "dashboard", label: "Главная" },
+    { id: "calendar", label: "Календарь" },
+    { id: "students", label: "Ученики" },
+    { id: "groups", label: "Группы" },
+    { id: "payments", label: "Оплаты" },
   ],
   admin: [
-    { id: "dashboard", label: "Главная", icon: "" },
-    { id: "students", label: "Ученики", icon: "👤" },
-    { id: "groups", label: "Группы", icon: "👥" },
-    { id: "payments", label: "Оплаты", icon: "₽" },
+    { id: "dashboard", label: "Главная" },
+    { id: "calendar", label: "Календарь" },
+    { id: "students", label: "Ученики" },
+    { id: "groups", label: "Группы" },
+    { id: "payments", label: "Оплаты" },
   ],
   teacher: [
-    { id: "groups", label: "Мои группы", icon: "" },
-    { id: "homework", label: "ДЗ", icon: "" },
-    { id: "feedback", label: "Фидбэк", icon: "💬" },
+    { id: "groups", label: "Мои группы" },
+    { id: "calendar", label: "Календарь" },
+    { id: "homework", label: "ДЗ" },
+    { id: "feedback", label: "Фидбэк" },
   ],
   parent: [
-    { id: "child", label: "Мой ребёнок", icon: "👶" },
-    { id: "homework", label: "ДЗ", icon: "📝" },
-    { id: "payments", label: "Оплата", icon: "₽" },
+    { id: "child", label: "Мой ребёнок" },
+    { id: "calendar", label: "Календарь" },
+    { id: "homework", label: "ДЗ" },
+    { id: "payments", label: "Оплата" },
   ],
 };
 
@@ -146,7 +152,10 @@ function renderNav() {
 }
 
 function navIconFor(id) {
-  const icons = { dashboard: "▲", students: "◎", groups: "■", payments: "₽", homework: "✎", feedback: "✉", child: "★" };
+  const icons = {
+    dashboard: "▲", calendar: "📅", students: "◎", groups: "■",
+    payments: "₽", homework: "✎", feedback: "", child: "★"
+  };
   return icons[id] || "●";
 }
 
@@ -184,9 +193,18 @@ function formatDate(dateStr) {
   return `${d.getDate()} ${months[d.getMonth()]}`;
 }
 
+function formatDateLong(dateStr) {
+  const d = new Date(dateStr);
+  const months = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+  const weekdays = ["воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота"];
+  return `${weekdays[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]}`;
+}
+
 function daysUntil(dateStr) {
   const today = new Date();
+  today.setHours(0, 0, 0, 0);
   const target = new Date(dateStr);
+  target.setHours(0, 0, 0, 0);
   return Math.round((target - today) / 86400000);
 }
 
@@ -213,6 +231,38 @@ function studentsForParent() {
   return DB.students.filter(s => ids.includes(s.id));
 }
 
+// ===== УВЕДОМЛЕНИЯ =====
+function getPaymentNotifications() {
+  const notifications = [];
+  DB.students.forEach(s => {
+    const days = daysUntil(s.nextPaymentDate);
+    const remaining = remainingLessons(s);
+    if (remaining <= 0) {
+      notifications.push({
+        type: "danger",
+        student: s,
+        text: `Абонемент закончился`,
+        days: days,
+      });
+    } else if (days <= 3 && days >= 0) {
+      notifications.push({
+        type: "warn",
+        student: s,
+        text: `Оплата через ${days} дн. (${remaining} зан. осталось)`,
+        days: days,
+      });
+    } else if (days < 0) {
+      notifications.push({
+        type: "danger",
+        student: s,
+        text: `Просрочено на ${Math.abs(days)} дн.`,
+        days: days,
+      });
+    }
+  });
+  return notifications.sort((a, b) => a.days - b.days);
+}
+
 function renderPage() {
   const el = document.getElementById("page-content");
   if (currentDetail) {
@@ -221,6 +271,7 @@ function renderPage() {
   }
   const role = currentUser.role;
   if ((role === "owner" || role === "admin") && currentTab === "dashboard") { el.innerHTML = renderDashboard(); return; }
+  if (currentTab === "calendar") { el.innerHTML = renderCalendar(); return; }
   if (currentTab === "students") { el.innerHTML = renderStudentsList(); return; }
   if (currentTab === "groups") { el.innerHTML = renderGroupsList(); return; }
   if (currentTab === "payments") { el.innerHTML = renderPaymentsPage(); return; }
@@ -237,10 +288,7 @@ function renderDashboard() {
   const monthRevenue = DB.payments
     .filter(p => p.date.startsWith(monthPrefix))
     .reduce((sum, p) => sum + p.amount, 0);
-  const expiringCount = DB.students.filter(s => daysUntil(s.nextPaymentDate) <= 3 || remainingLessons(s) <= 0).length;
-  const expiring = DB.students
-    .filter(s => daysUntil(s.nextPaymentDate) <= 5 || remainingLessons(s) <= 2)
-    .sort((a, b) => daysUntil(a.nextPaymentDate) - daysUntil(b.nextPaymentDate));
+  const notifications = getPaymentNotifications();
 
   return `
     <div class="page-title">Главная</div>
@@ -248,24 +296,165 @@ function renderDashboard() {
       <div class="stat-card"><div class="stat-value">${totalStudents}</div><div class="stat-label">Учеников</div></div>
       <div class="stat-card"><div class="stat-value">${totalGroups}</div><div class="stat-label">Групп</div></div>
       <div class="stat-card"><div class="stat-value">${monthRevenue.toLocaleString('ru-RU')} ₽</div><div class="stat-label">Оплаты за ${getCurrentMonthName()}</div></div>
-      <div class="stat-card"><div class="stat-value" style="color:${expiringCount > 0 ? 'var(--danger)' : 'var(--navy)'}">${expiringCount}</div><div class="stat-label">Истекает абонемент</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:${notifications.length > 0 ? 'var(--danger)' : 'var(--navy)'}">${notifications.length}</div><div class="stat-label">Уведомлений</div></div>
     </div>
-    <div class="section-label">Требуют внимания</div>
-    ${expiring.length === 0 ?
+    <div class="section-label">🔔 Уведомления об оплате</div>
+    ${notifications.length === 0 ?
       `<div class="empty-state"><div class="empty-state-icon">✓</div>Все абонементы в порядке</div>` :
-      expiring.map(s => {
+      notifications.map(n => {
+        const s = n.student;
         const badge = paymentStatusBadge(s);
         return `
-          <div class="list-item" onclick="openDetail('student','${s.id}')">
+          <div class="list-item" onclick="openDetail('student','${s.id}')" style="background:${n.type === 'danger' ? 'rgba(220,53,69,0.08)' : 'rgba(255,193,7,0.08)'}">
             <div class="list-item-main">
               <div class="list-item-title">${s.name}</div>
-              <div class="list-item-sub">${getGroup(s.groupId)?.name || ''}</div>
+              <div class="list-item-sub">${getGroup(s.groupId)?.name || ''} · ${n.text}</div>
             </div>
             <div class="list-item-right"><span class="badge ${badge.cls}">${badge.text}</span></div>
           </div>`;
       }).join("")
     }
   `;
+}
+
+// ===== КАЛЕНДАРЬ =====
+function renderCalendar() {
+  const isTeacher = currentUser.role === "teacher";
+  const isParent = currentUser.role === "parent";
+
+  let lessons = [...DB.lessons];
+  if (isTeacher) {
+    const myGroups = DB.groups.filter(g => g.teacherId === currentUser.id).map(g => g.id);
+    lessons = lessons.filter(l => myGroups.includes(l.groupId));
+  }
+  if (isParent) {
+    const myStudents = studentsForParent();
+    const myGroups = [...new Set(myStudents.map(s => s.groupId))];
+    lessons = lessons.filter(l => myGroups.includes(l.groupId));
+  }
+
+  return `
+    <div class="page-title">Расписание</div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;">
+      <button class="${calendarView === 'week' ? 'btn-primary' : 'btn-secondary'}" onclick="setCalendarView('week')" style="flex:1">Неделя</button>
+      <button class="${calendarView === 'month' ? 'btn-primary' : 'btn-secondary'}" onclick="setCalendarView('month')" style="flex:1">Месяц</button>
+    </div>
+    ${calendarView === 'week' ? renderWeekView(lessons) : renderMonthView(lessons)}
+  `;
+}
+
+function setCalendarView(view) {
+  calendarView = view;
+  renderPage();
+}
+
+function getWeekDays(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(d.setDate(diff));
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const day = new Date(monday);
+    day.setDate(monday.getDate() + i);
+    days.push(day);
+  }
+  return days;
+}
+
+function renderWeekView(lessons) {
+  const weekDays = getWeekDays(calendarDate);
+  const weekStart = weekDays[0];
+  const weekEnd = weekDays[6];
+  const months = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+  const weekdays = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <button class="btn-secondary" onclick="changeWeek(-1)" style="padding:6px 12px;">←</button>
+      <div style="font-weight:600;font-size:14px;">${weekStart.getDate()} ${months[weekStart.getMonth()]} — ${weekEnd.getDate()} ${months[weekEnd.getMonth()]} ${weekEnd.getFullYear()}</div>
+      <button class="btn-secondary" onclick="changeWeek(1)" style="padding:6px 12px;">→</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;">
+      ${weekDays.map((day, i) => {
+        const dateStr = day.toISOString().slice(0, 10);
+        const dayLessons = lessons.filter(l => l.date === dateStr);
+        const isToday = dateStr === new Date().toISOString().slice(0, 10);
+        return `
+          <div style="background:${isToday ? 'var(--navy)' : 'var(--card-bg)'};border-radius:10px;padding:10px;min-height:120px;">
+            <div style="font-size:11px;color:${isToday ? '#fff' : 'var(--text-muted)'};margin-bottom:4px;">${weekdays[i]}</div>
+            <div style="font-size:18px;font-weight:700;color:${isToday ? '#fff' : 'var(--text)'};margin-bottom:8px;">${day.getDate()}</div>
+            ${dayLessons.map(l => {
+              const g = getGroup(l.groupId);
+              return `
+                <div style="background:${isToday ? 'rgba(255,255,255,0.2)' : 'var(--accent-light)'};border-radius:6px;padding:6px;margin-bottom:4px;font-size:11px;">
+                  <div style="font-weight:600;color:${isToday ? '#fff' : 'var(--navy)'};">${g ? g.name : 'Группа'}</div>
+                  <div style="color:${isToday ? 'rgba(255,255,255,0.8)' : 'var(--text-secondary)'};margin-top:2px;">${l.topic || 'Занятие'}</div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function changeWeek(delta) {
+  const d = new Date(calendarDate);
+  d.setDate(d.getDate() + delta * 7);
+  calendarDate = d;
+  renderPage();
+}
+
+function renderMonthView(lessons) {
+  const year = calendarDate.getFullYear();
+  const month = calendarDate.getMonth();
+  const months = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+  const weekdays = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const startDayOfWeek = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
+  const totalDays = lastDay.getDate();
+
+  const cells = [];
+  for (let i = 0; i < startDayOfWeek; i++) cells.push(null);
+  for (let d = 1; d <= totalDays; d++) cells.push(new Date(year, month, d));
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <button class="btn-secondary" onclick="changeMonth(-1)" style="padding:6px 12px;">←</button>
+      <div style="font-weight:600;font-size:14px;">${months[month]} ${year}</div>
+      <button class="btn-secondary" onclick="changeMonth(1)" style="padding:6px 12px;">→</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;">
+      ${weekdays.map(w => `<div style="text-align:center;font-size:11px;color:var(--text-muted);font-weight:600;padding:4px;">${w}</div>`).join("")}
+      ${cells.map(cell => {
+        if (!cell) return `<div></div>`;
+        const dateStr = cell.toISOString().slice(0, 10);
+        const dayLessons = lessons.filter(l => l.date === dateStr);
+        const isToday = dateStr === new Date().toISOString().slice(0, 10);
+        return `
+          <div style="background:${isToday ? 'var(--navy)' : 'var(--card-bg)'};border-radius:8px;padding:6px;min-height:60px;">
+            <div style="font-size:13px;font-weight:700;color:${isToday ? '#fff' : 'var(--text)'};margin-bottom:4px;">${cell.getDate()}</div>
+            ${dayLessons.slice(0, 2).map(l => {
+              const g = getGroup(l.groupId);
+              return `<div style="font-size:10px;color:${isToday ? '#fff' : 'var(--navy)'};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${g ? g.name : ''}</div>`;
+            }).join("")}
+            ${dayLessons.length > 2 ? `<div style="font-size:10px;color:var(--text-muted);">+${dayLessons.length - 2}</div>` : ''}
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function changeMonth(delta) {
+  const d = new Date(calendarDate);
+  d.setMonth(d.getMonth() + delta);
+  calendarDate = d;
+  renderPage();
 }
 
 function renderStudentsList() {
@@ -477,7 +666,7 @@ function renderGroupDetail(id) {
       lessons.map(l => `
         <div class="card">
           <div class="row-between" style="margin-bottom:6px">
-            <span style="font-weight:600;font-size:14px">${formatDate(l.date)}</span>
+            <span style="font-weight:600;font-size:14px">${formatDateLong(l.date)}</span>
             <span class="badge ${l.status === 'completed' ? 'badge-ok' : 'badge-navy'}">${l.status === 'completed' ? 'Проведено' : 'Запланировано'}</span>
           </div>
           <div style="font-size:13px;color:var(--text-secondary);margin-bottom:${isTeacher ? '10px' : '0'}">${l.topic}</div>
@@ -553,13 +742,13 @@ function renderPaymentsPage() {
     <div class="page-title">Оплаты</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
       <div style="font-size:14px;color:var(--text-secondary);">Всего оплат: ${allPayments.length}</div>
-      <button class="btn-secondary" onclick="exportPaymentsToCSV()" style="padding:8px 12px;font-size:13px;"> Экспорт в CSV</button>
+      <button class="btn-secondary" onclick="exportPaymentsToCSV()" style="padding:8px 12px;font-size:13px;">⬇ Экспорт в CSV</button>
     </div>
     <div class="stats-grid">
       <div class="stat-card"><div class="stat-value">${monthTotal.toLocaleString('ru-RU')} ₽</div><div class="stat-label">Поступления за ${getCurrentMonthName()}</div></div>
       <div class="stat-card"><div class="stat-value" style="color:${expiring.length ? 'var(--danger)' : 'var(--navy)'}">${expiring.length}</div><div class="stat-label">Нужно продлить</div></div>
     </div>
-    <div class="section-label">Нужно продлить абонемент</div>
+    <div class="section-label">🔔 Требуют оплаты</div>
     ${expiring.length === 0 ? `<div class="empty-state" style="padding:20px"><div class="empty-state-icon">✓</div>Все оплачено</div>` :
       expiring.map(s => {
         const badge = paymentStatusBadge(s);
@@ -850,7 +1039,6 @@ function renderChildPage() {
   }).join("<div style='height:24px'></div>");
 }
 
-// ========== ДОБАВЛЕНИЕ УЧЕНИКА ==========
 function openAddStudentModal() {
   const groups = DB.groups;
   const sheet = document.getElementById("modal-sheet");
@@ -892,7 +1080,6 @@ async function confirmAddStudent() {
   }
 }
 
-// ========== ДОБАВЛЕНИЕ УЧИТЕЛЯ ==========
 function openAddTeacherModal() {
   const sheet = document.getElementById("modal-sheet");
   sheet.innerHTML = `
@@ -925,7 +1112,6 @@ async function confirmAddTeacher() {
   }
 }
 
-// ========== ДОБАВЛЕНИЕ ГРУППЫ ==========
 function openAddGroupModal() {
   const teachers = DB.teachers;
   const sheet = document.getElementById("modal-sheet");
