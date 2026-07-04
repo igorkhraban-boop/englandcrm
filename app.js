@@ -154,7 +154,7 @@ function renderNav() {
 function navIconFor(id) {
   const icons = {
     dashboard: "▲", calendar: "📅", students: "◎", groups: "■",
-    payments: "₽", homework: "✎", feedback: "", child: "★"
+    payments: "₽", homework: "✎", feedback: "💬", child: "★"
   };
   return icons[id] || "●";
 }
@@ -231,33 +231,17 @@ function studentsForParent() {
   return DB.students.filter(s => ids.includes(s.id));
 }
 
-// ===== УВЕДОМЛЕНИЯ =====
 function getPaymentNotifications() {
   const notifications = [];
   DB.students.forEach(s => {
     const days = daysUntil(s.nextPaymentDate);
     const remaining = remainingLessons(s);
     if (remaining <= 0) {
-      notifications.push({
-        type: "danger",
-        student: s,
-        text: `Абонемент закончился`,
-        days: days,
-      });
+      notifications.push({ type: "danger", student: s, text: `Абонемент закончился`, days });
     } else if (days <= 3 && days >= 0) {
-      notifications.push({
-        type: "warn",
-        student: s,
-        text: `Оплата через ${days} дн. (${remaining} зан. осталось)`,
-        days: days,
-      });
+      notifications.push({ type: "warn", student: s, text: `Оплата через ${days} дн. (${remaining} зан. осталось)`, days });
     } else if (days < 0) {
-      notifications.push({
-        type: "danger",
-        student: s,
-        text: `Просрочено на ${Math.abs(days)} дн.`,
-        days: days,
-      });
+      notifications.push({ type: "danger", student: s, text: `Просрочено на ${Math.abs(days)} дн.`, days });
     }
   });
   return notifications.sort((a, b) => a.days - b.days);
@@ -321,7 +305,6 @@ function renderDashboard() {
 function renderCalendar() {
   const isTeacher = currentUser.role === "teacher";
   const isParent = currentUser.role === "parent";
-
   let lessons = [...DB.lessons];
   if (isTeacher) {
     const myGroups = DB.groups.filter(g => g.teacherId === currentUser.id).map(g => g.id);
@@ -474,7 +457,7 @@ function renderStudentsList() {
     <div class="page-title">Ученики</div>
     ${canEdit ? `<button class="btn-primary" onclick="openAddStudentModal()" style="margin-bottom:16px">+ Добавить ученика</button>` : ''}
     <div style="margin-bottom:16px;">
-      <input type="text" class="form-input" placeholder=" Поиск по имени или группе..."
+      <input type="text" class="form-input" placeholder="🔍 Поиск по имени или группе..."
              value="${studentSearchQuery}"
              oninput="studentSearchQuery = this.value; renderPage();">
     </div>
@@ -496,6 +479,7 @@ function renderStudentsList() {
   `;
 }
 
+// ===== ДЕТАЛЬ УЧЕНИКА (С КОДОМ TELEGRAM) =====
 function renderStudentDetail(id) {
   const s = getStudent(id);
   if (!s) return `<div class="empty-state">Ученик не найден</div>`;
@@ -507,6 +491,7 @@ function renderStudentDetail(id) {
   const studentHomework = DB.homework.filter(h => h.studentId === id).sort((a, b) => b.date.localeCompare(a.date));
   const studentFeedback = DB.feedback.filter(f => f.studentId === id).sort((a, b) => b.date.localeCompare(a.date));
   const canEdit = currentUser.role === "owner" || currentUser.role === "admin";
+  const bindCode = s.bindCode || s.id.slice(-6);
 
   return `
     <button class="back-btn" onclick="closeDetail()">← Назад</button>
@@ -539,6 +524,22 @@ function renderStudentDetail(id) {
       </div>
       ${canEdit ? `<button class="btn-primary" style="margin-top:14px" onclick="openRenewModal('${id}')">Продлить абонемент</button>` : ''}
     </div>
+
+    ${canEdit ? `
+      <div class="card" style="margin-top:16px;background:linear-gradient(135deg, var(--accent-light), rgba(0,136,204,0.08));">
+        <div style="font-size:13px;font-weight:600;color:var(--navy);margin-bottom:8px;">🔗 Привязка Telegram-бота</div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">
+          Родитель пишет боту <b>@england_crm_bot</b> команду:
+        </div>
+        <div style="background:#fff;padding:12px;border-radius:8px;text-align:center;font-size:22px;font-weight:700;letter-spacing:4px;color:var(--navy);font-family:monospace;border:2px dashed var(--accent);">
+          /bind ${bindCode}
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:8px;text-align:center;">
+          После привязки родитель будет получать уведомления о каждом занятии
+        </div>
+      </div>
+    ` : ''}
+
     ${s.notes ? `<div class="section-label">Заметки преподавателя</div><div class="card"><div style="font-size:14px;line-height:1.5">${s.notes}</div></div>` : ''}
     <div class="section-label">Домашние задания</div>
     ${studentHomework.length === 0 ? `<div class="card"><div style="font-size:13px;color:var(--text-muted)">Заданий пока нет</div></div>` :
@@ -1072,7 +1073,7 @@ async function confirmAddStudent() {
   showToast("Создаём ученика...");
   try {
     const result = await dbAddStudent({ name, age, groupId, parentName, lessons, amount });
-    showToast(`Ученик добавлен! Логин родителя: ${result.parentLogin}, пароль: ${result.parentPassword}`);
+    showToast(`Ученик добавлен! Логин родителя: ${result.parentLogin}, пароль: ${result.parentPassword}, код Telegram: ${result.bindCode}`);
     renderPage();
   } catch (e) {
     console.error(e);
