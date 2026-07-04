@@ -61,6 +61,7 @@ async function loadAllFromSupabase() {
     lastPaymentDate: s.last_payment_date,
     nextPaymentDate: s.next_payment_date,
     paymentAmount: s.payment_amount,
+    bindCode: s.bind_code,
   }));
   DB.lessons = (lessonsRes.data || []).map(l => ({ ...l, groupId: l.group_id }));
   DB.attendance = attendanceObj;
@@ -105,6 +106,7 @@ async function dbRenewSubscription(studentId, lessons, amount) {
   await loadAllFromSupabase();
 }
 
+// ===== ОТМЕТКА ПОСЕЩАЕМОСТИ + TELEGRAM =====
 async function dbMarkAttendance(lessonId, studentId, status) {
   const current = DB.attendance[lessonId] && DB.attendance[lessonId][studentId];
   if (current === status) {
@@ -126,6 +128,17 @@ async function dbMarkAttendance(lessonId, studentId, status) {
   }
   await supabaseClient.from("lessons").update({ status: "completed" }).eq("id", lessonId);
   await loadAllFromSupabase();
+
+  // 🔔 Уведомление в Telegram (в фоне, не блокирует UI)
+  try {
+    fetch('/api/telegram-webhook', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'attendance', studentId, lessonId }),
+    });
+  } catch (e) {
+    console.error('Telegram notify failed', e);
+  }
 }
 
 async function dbAddLesson(groupId, date, topic) {
@@ -135,13 +148,28 @@ async function dbAddLesson(groupId, date, topic) {
   await loadAllFromSupabase();
 }
 
+// ===== ДОБАВЛЕНИЕ ДЗ + TELEGRAM =====
 async function dbAddHomework(studentId, groupId, text) {
   const today = new Date().toISOString().slice(0, 10);
-  await supabaseClient.from("homework").insert({
+  const result = await supabaseClient.from("homework").insert({
     id: "hw" + Date.now(), student_id: studentId, group_id: groupId,
     date: today, text, status: "assigned"
-  });
+  }).select();
   await loadAllFromSupabase();
+
+  // 🔔 Уведомление о новом ДЗ в Telegram
+  const hwId = result?.data?.[0]?.id;
+  if (hwId) {
+    try {
+      fetch('/api/telegram-webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'homework', homeworkId: hwId }),
+      });
+    } catch (e) {
+      console.error('Telegram notify failed', e);
+    }
+  }
 }
 
 async function dbAddFeedback(studentId, teacherId, text) {
@@ -152,18 +180,21 @@ async function dbAddFeedback(studentId, teacherId, text) {
   await loadAllFromSupabase();
 }
 
+// ===== ДОБАВЛЕНИЕ УЧЕНИКА =====
 async function dbAddStudent({ name, age, groupId, parentName, lessons, amount }) {
   const studentId = "s" + Date.now();
   const today = new Date().toISOString().slice(0, 10);
   const next = new Date();
   next.setDate(next.getDate() + 30);
   const nextStr = next.toISOString().slice(0, 10);
+  const bindCode = studentId.slice(-6);
 
   await supabaseClient.from("students").insert({
     id: studentId, name, age: parseInt(age), group_id: groupId,
     parent_login: null, subscription_total: parseInt(lessons),
     subscription_used: 0, last_payment_date: today,
-    next_payment_date: nextStr, payment_amount: parseInt(amount), notes: "",
+    next_payment_date: nextStr, payment_amount: parseInt(amount),
+    notes: "", bind_code: bindCode,
   });
 
   const parentLogin = "parent_" + studentId;
@@ -181,7 +212,7 @@ async function dbAddStudent({ name, age, groupId, parentName, lessons, amount })
   });
 
   await loadAllFromSupabase();
-  return { parentLogin, parentPassword };
+  return { parentLogin, parentPassword, bindCode };
 }
 
 async function dbAddTeacher({ name, login, password }) {
