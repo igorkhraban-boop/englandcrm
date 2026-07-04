@@ -529,7 +529,7 @@ function renderStudentDetail(id) {
       <div class="card" style="margin-top:16px;background:linear-gradient(135deg, var(--accent-light), rgba(0,136,204,0.08));">
         <div style="font-size:13px;font-weight:600;color:var(--navy);margin-bottom:8px;">🔗 Привязка Telegram-бота</div>
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">
-          Родитель пишет боту <b>@england_crm_bot</b> команду:
+          Родитель пишет боту <b>@england_notify_bot</b> команду:
         </div>
         <div style="background:#fff;padding:12px;border-radius:8px;text-align:center;font-size:22px;font-weight:700;letter-spacing:4px;color:var(--navy);font-family:monospace;border:2px dashed var(--accent);">
           /bind ${bindCode}
