@@ -20,9 +20,7 @@ async function initData() {
   try {
     await loadAllFromSupabase();
     dataLoaded = true;
-    subscribeToRealtimeUpdates(() => {
-      if (currentUser) renderPage();
-    });
+    subscribeToRealtimeUpdates(() => { if (currentUser) renderPage(); });
   } catch (e) {
     console.error("Failed to load data", e);
     showToast("Не удалось подключиться к базе данных.");
@@ -41,9 +39,7 @@ function showLoadingOverlay(show) {
       el.textContent = "Загрузка данных...";
       document.body.appendChild(el);
     }
-  } else if (el) {
-    el.remove();
-  }
+  } else if (el) { el.remove(); }
 }
 
 function showToast(msg) {
@@ -57,18 +53,9 @@ async function doLogin() {
   const login = document.getElementById("login-input").value.trim().toLowerCase();
   const password = document.getElementById("password-input").value;
   const errEl = document.getElementById("login-error");
-
-  if (!dataLoaded) {
-    showToast("Подождите, идёт загрузка...");
-    await dbReady;
-  }
-
+  if (!dataLoaded) { showToast("Подождите, идёт загрузка..."); await dbReady; }
   const user = DB.users[login];
-  if (!user || user.password !== password) {
-    errEl.style.display = "block";
-    return;
-  }
-
+  if (!user || user.password !== password) { errEl.style.display = "block"; return; }
   errEl.style.display = "none";
   currentUser = { ...user, login };
   sessionStorage.setItem("england_crm_session", JSON.stringify(currentUser));
@@ -301,7 +288,6 @@ function renderDashboard() {
   `;
 }
 
-// ===== КАЛЕНДАРЬ =====
 function renderCalendar() {
   const isTeacher = currentUser.role === "teacher";
   const isParent = currentUser.role === "parent";
@@ -315,7 +301,6 @@ function renderCalendar() {
     const myGroups = [...new Set(myStudents.map(s => s.groupId))];
     lessons = lessons.filter(l => myGroups.includes(l.groupId));
   }
-
   return `
     <div class="page-title">Расписание</div>
     <div style="display:flex;gap:8px;margin-bottom:16px;">
@@ -326,10 +311,7 @@ function renderCalendar() {
   `;
 }
 
-function setCalendarView(view) {
-  calendarView = view;
-  renderPage();
-}
+function setCalendarView(view) { calendarView = view; renderPage(); }
 
 function getWeekDays(date) {
   const d = new Date(date);
@@ -395,12 +377,10 @@ function renderMonthView(lessons) {
   const month = calendarDate.getMonth();
   const months = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
   const weekdays = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
-
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const startDayOfWeek = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
   const totalDays = lastDay.getDate();
-
   const cells = [];
   for (let i = 0; i < startDayOfWeek; i++) cells.push(null);
   for (let d = 1; d <= totalDays; d++) cells.push(new Date(year, month, d));
@@ -479,7 +459,7 @@ function renderStudentsList() {
   `;
 }
 
-// ===== ДЕТАЛЬ УЧЕНИКА (С КОДОМ TELEGRAM) =====
+// ===== ДЕТАЛЬ УЧЕНИКА (С КОНТАКТАМИ РОДИТЕЛЯ И УВЕДОМЛЕНИЕМ) =====
 function renderStudentDetail(id) {
   const s = getStudent(id);
   if (!s) return `<div class="empty-state">Ученик не найден</div>`;
@@ -491,6 +471,7 @@ function renderStudentDetail(id) {
   const studentHomework = DB.homework.filter(h => h.studentId === id).sort((a, b) => b.date.localeCompare(a.date));
   const studentFeedback = DB.feedback.filter(f => f.studentId === id).sort((a, b) => b.date.localeCompare(a.date));
   const canEdit = currentUser.role === "owner" || currentUser.role === "admin";
+  const isTeacher = currentUser.role === "teacher";
   const bindCode = s.bindCode || s.id.slice(-6);
 
   return `
@@ -529,14 +510,36 @@ function renderStudentDetail(id) {
       <div class="card" style="margin-top:16px;background:linear-gradient(135deg, var(--accent-light), rgba(0,136,204,0.08));">
         <div style="font-size:13px;font-weight:600;color:var(--navy);margin-bottom:8px;">🔗 Привязка Telegram-бота</div>
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">
-          Родитель пишет боту <b>@england_notify_bot</b> команду:
+          Родитель пишет боту <b>@england_crm_bot</b> команду:
         </div>
         <div style="background:#fff;padding:12px;border-radius:8px;text-align:center;font-size:22px;font-weight:700;letter-spacing:4px;color:var(--navy);font-family:monospace;border:2px dashed var(--accent);">
           /bind ${bindCode}
         </div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:8px;text-align:center;">
-          После привязки родитель будет получать уведомления о каждом занятии
-        </div>
+      </div>
+    ` : ''}
+
+    ${isTeacher ? `
+      <div class="card" style="margin-top:16px;">
+        <div style="font-size:13px;font-weight:600;color:var(--navy);margin-bottom:10px;">📞 Контакты родителя</div>
+        ${s.parentPhone ? `
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+            <span style="font-size:18px;">📱</span>
+            <div>
+              <div style="font-size:11px;color:var(--text-muted);">Телефон</div>
+              <a href="tel:${s.parentPhone}" style="font-size:14px;font-weight:600;color:var(--accent);text-decoration:none;">${s.parentPhone}</a>
+            </div>
+          </div>
+        ` : `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;"> Телефон не указан</div>`}
+        ${s.parentEmail ? `
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-size:18px;">✉️</span>
+            <div>
+              <div style="font-size:11px;color:var(--text-muted);">Email</div>
+              <a href="mailto:${s.parentEmail}" style="font-size:14px;font-weight:600;color:var(--accent);text-decoration:none;">${s.parentEmail}</a>
+            </div>
+          </div>
+        ` : `<div style="font-size:12px;color:var(--text-muted);">✉️ Email не указан</div>`}
+        <button class="btn-primary" style="margin-top:14px" onclick="openNotifyModal('${id}')"> Написать родителю</button>
       </div>
     ` : ''}
 
@@ -552,7 +555,7 @@ function renderStudentDetail(id) {
     }
     <div class="section-label">Фидбэк от преподавателя</div>
     ${studentFeedback.length === 0 ? `<div class="card"><div style="font-size:13px;color:var(--text-muted)">Фидбэка пока нет</div></div>` :
-      studentFeedback.map(f => `
+      studentFeedback.filter(f => !f.text.startsWith('[УВЕДОМЛЕНИЕ')).map(f => `
         <div class="card">
           <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">${formatDate(f.date)} · ${getTeacher(f.teacherId)?.name || ''}</div>
           <div style="font-size:14px;line-height:1.5">${f.text}</div>
@@ -607,6 +610,46 @@ async function confirmRenew(studentId) {
 
 function closeModal() {
   document.getElementById("modal-overlay").classList.remove("open");
+}
+
+// 🔔 МОДАЛКА: НАПИСАТЬ РОДИТЕЛЮ
+function openNotifyModal(studentId) {
+  const s = getStudent(studentId);
+  const sheet = document.getElementById("modal-sheet");
+  sheet.innerHTML = `
+    <div class="modal-title">🔔 Написать родителю</div>
+    <div class="form-group">
+      <label class="form-label">Ученик</label>
+      <input class="form-input" value="${s.name}" disabled style="background:var(--bg)">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Сообщение родителю</label>
+      <textarea class="form-input" id="notify-message" placeholder="Например: Ариана сегодня отлично поработала! На следующем занятии повторим Past Simple."></textarea>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
+      ⚠️ Сообщение будет отправлено через Telegram-бот. Если родитель не привязан — придёт ошибка.
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal()">Отмена</button>
+      <button class="btn-primary flex" onclick="confirmSendNotify('${studentId}')">Отправить</button>
+    </div>
+  `;
+  document.getElementById("modal-overlay").classList.add("open");
+}
+
+async function confirmSendNotify(studentId) {
+  const message = document.getElementById("notify-message").value.trim();
+  if (!message) { showToast("Введите сообщение"); return; }
+  closeModal();
+  showToast("Отправляем...");
+  try {
+    await dbSendManualNotification(studentId, message);
+    showToast("✅ Сообщение отправлено родителю!");
+    renderPage();
+  } catch (e) {
+    console.error(e);
+    showToast("❌ Ошибка: " + e.message);
+  }
 }
 
 function renderGroupsList() {
@@ -670,7 +713,19 @@ function renderGroupDetail(id) {
             <span style="font-weight:600;font-size:14px">${formatDateLong(l.date)}</span>
             <span class="badge ${l.status === 'completed' ? 'badge-ok' : 'badge-navy'}">${l.status === 'completed' ? 'Проведено' : 'Запланировано'}</span>
           </div>
-          <div style="font-size:13px;color:var(--text-secondary);margin-bottom:${isTeacher ? '10px' : '0'}">${l.topic}</div>
+          <div style="font-size:13px;color:var(--text-secondary);margin-bottom:6px">📖 ${l.topic || 'Тема не указана'}</div>
+          ${l.teacherComment ? `
+            <div style="background:var(--accent-light);border-left:3px solid var(--accent);padding:8px 10px;border-radius:6px;margin-bottom:6px;">
+              <div style="font-size:11px;color:var(--accent);font-weight:600;margin-bottom:2px;">💬 Комментарий учителя</div>
+              <div style="font-size:13px;line-height:1.4;color:var(--text);">${l.teacherComment}</div>
+            </div>
+          ` : ''}
+          ${l.materials ? `
+            <div style="background:#f0f0f0;padding:8px 10px;border-radius:6px;margin-bottom:6px;">
+              <div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:2px;">📎 Материалы</div>
+              <div style="font-size:13px;line-height:1.5;color:var(--text);white-space:pre-wrap;">${l.materials}</div>
+            </div>
+          ` : ''}
           ${isTeacher ? `
             <div style="margin-top:8px">
               ${students.map(s => {
@@ -709,6 +764,14 @@ function openAddLessonModal(groupId) {
     <div class="modal-title">Новое занятие</div>
     <div class="form-group"><label class="form-label">Дата</label><input class="form-input" type="date" id="lesson-date" value="${today}"></div>
     <div class="form-group"><label class="form-label">Тема занятия</label><input class="form-input" id="lesson-topic" placeholder="Например: Past Simple — практика"></div>
+    <div class="form-group">
+      <label class="form-label">💬 Комментарий (что прошли / что повторить)</label>
+      <textarea class="form-input" id="lesson-comment" placeholder="Например: Прошли Present Perfect. На следующем занятии — повторить неправильные глаголы."></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label"> Материалы (ссылки, PDF, видео)</label>
+      <textarea class="form-input" id="lesson-materials" placeholder="Например:&#10;• https://example.com/worksheet.pdf&#10;• Видео: https://youtube.com/...&#10;• Учебник: стр. 45-47"></textarea>
+    </div>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="closeModal()">Отмена</button>
       <button class="btn-primary flex" onclick="confirmAddLesson('${groupId}')">Создать</button>
@@ -720,10 +783,12 @@ function openAddLessonModal(groupId) {
 async function confirmAddLesson(groupId) {
   const date = document.getElementById("lesson-date").value;
   const topic = document.getElementById("lesson-topic").value.trim() || "Занятие";
+  const comment = document.getElementById("lesson-comment").value.trim();
+  const materials = document.getElementById("lesson-materials").value.trim();
   closeModal();
   showToast("Сохраняем...");
   try {
-    await dbAddLesson(groupId, date, topic);
+    await dbAddLesson(groupId, date, topic, materials, comment);
     showToast("Занятие добавлено");
     renderPage();
   } catch (e) {
@@ -749,7 +814,7 @@ function renderPaymentsPage() {
       <div class="stat-card"><div class="stat-value">${monthTotal.toLocaleString('ru-RU')} ₽</div><div class="stat-label">Поступления за ${getCurrentMonthName()}</div></div>
       <div class="stat-card"><div class="stat-value" style="color:${expiring.length ? 'var(--danger)' : 'var(--navy)'}">${expiring.length}</div><div class="stat-label">Нужно продлить</div></div>
     </div>
-    <div class="section-label">🔔 Требуют оплаты</div>
+    <div class="section-label"> Требуют оплаты</div>
     ${expiring.length === 0 ? `<div class="empty-state" style="padding:20px"><div class="empty-state-icon">✓</div>Все оплачено</div>` :
       expiring.map(s => {
         const badge = paymentStatusBadge(s);
@@ -783,10 +848,7 @@ function renderPaymentsPage() {
 
 function exportPaymentsToCSV() {
   const payments = [...DB.payments].sort((a, b) => b.date.localeCompare(a.date));
-  if (payments.length === 0) {
-    showToast("Нет оплат для экспорта");
-    return;
-  }
+  if (payments.length === 0) { showToast("Нет оплат для экспорта"); return; }
   let csv = "Дата;Ученик;Сумма (₽);Кол-во занятий\n";
   payments.forEach(p => {
     const student = getStudent(p.studentId);
@@ -933,7 +995,7 @@ function renderParentHomework() {
 
 function renderFeedbackPage() {
   const myStudents = studentsForTeacher(currentUser.id);
-  const myFeedback = DB.feedback.filter(f => myStudents.some(s => s.id === f.studentId)).sort((a, b) => b.date.localeCompare(a.date));
+  const myFeedback = DB.feedback.filter(f => myStudents.some(s => s.id === f.studentId) && !f.text.startsWith('[УВЕДОМЛЕНИЕ')).sort((a, b) => b.date.localeCompare(a.date));
   return `
     <div class="page-title">Фидбэк ученикам</div>
     <button class="btn-primary" onclick="openAddFeedbackModal()">+ Оставить фидбэк</button>
@@ -1001,7 +1063,7 @@ function renderChildPage() {
     const teacher = group ? getTeacher(group.teacherId) : null;
     const badge = paymentStatusBadge(s);
     const progressPct = Math.round((s.subscriptionUsed / s.subscriptionTotal) * 100);
-    const feedback = DB.feedback.filter(f => f.studentId === s.id).sort((a, b) => b.date.localeCompare(a.date));
+    const feedback = DB.feedback.filter(f => f.studentId === s.id && !f.text.startsWith('[УВЕДОМЛЕНИЕ')).sort((a, b) => b.date.localeCompare(a.date));
     return `
       <div class="detail-header">
         <div class="avatar">${getInitials(s.name)}</div>
@@ -1051,6 +1113,9 @@ function openAddStudentModal() {
     <div class="divider"></div>
     <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">Данные родителя (создаётся автоматически)</div>
     <div class="form-group"><label class="form-label">ФИО родителя</label><input class="form-input" id="st-parent" placeholder="Иванова Мария"></div>
+    <div class="form-group"><label class="form-label">📱 Телефон родителя</label><input class="form-input" id="st-phone" placeholder="+7 900 123 45 67"></div>
+    <div class="form-group"><label class="form-label">✉️ Email родителя</label><input class="form-input" id="st-email" placeholder="parent@example.com"></div>
+    <div class="divider"></div>
     <div class="form-group"><label class="form-label">Кол-во занятий в абонементе</label><input class="form-input" type="number" id="st-lessons" value="8"></div>
     <div class="form-group"><label class="form-label">Сумма оплаты (₽)</label><input class="form-input" type="number" id="st-amount" value="4000"></div>
     <div class="modal-actions">
@@ -1066,14 +1131,16 @@ async function confirmAddStudent() {
   const age = document.getElementById("st-age").value;
   const groupId = document.getElementById("st-group").value;
   const parentName = document.getElementById("st-parent").value.trim();
+  const parentPhone = document.getElementById("st-phone").value.trim();
+  const parentEmail = document.getElementById("st-email").value.trim();
   const lessons = document.getElementById("st-lessons").value;
   const amount = document.getElementById("st-amount").value;
   if (!name || !parentName) { showToast("Заполните имя ученика и родителя"); return; }
   closeModal();
   showToast("Создаём ученика...");
   try {
-    const result = await dbAddStudent({ name, age, groupId, parentName, lessons, amount });
-    showToast(`Ученик добавлен! Логин родителя: ${result.parentLogin}, пароль: ${result.parentPassword}, код Telegram: ${result.bindCode}`);
+    const result = await dbAddStudent({ name, age, groupId, parentName, parentPhone, parentEmail, lessons, amount });
+    showToast(`Ученик добавлен! Логин: ${result.parentLogin}, пароль: ${result.parentPassword}, код Telegram: ${result.bindCode}`);
     renderPage();
   } catch (e) {
     console.error(e);
