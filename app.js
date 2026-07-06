@@ -18,15 +18,25 @@ function getCurrentMonthName() {
 async function initData() {
   showLoadingOverlay(true);
   try {
-    await loadAllFromSupabase();
-    dataLoaded = true;
-    subscribeToRealtimeUpdates(() => { if (currentUser) renderPage(); });
+    // Сначала пробуем загрузить из кэша (мгновенно)
+    const fromCache = await loadFromCacheOrNetwork();
+    if (!fromCache) {
+      // Если кэша нет — грузим из сети
+      await loadAllFromSupabase();
+      dataLoaded = true;
+    }
+    subscribeToRealtimeUpdates(() => {
+      if (currentUser) renderPage();
+    });
   } catch (e) {
     console.error("Failed to load data", e);
     showToast("Не удалось подключиться к базе данных.");
   }
   showLoadingOverlay(false);
-  dbReadyResolve();
+  if (!dbReadyResolve._called) {
+    dbReadyResolve();
+    dbReadyResolve._called = true;
+  }
 }
 
 function showLoadingOverlay(show) {
