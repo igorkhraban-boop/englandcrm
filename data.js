@@ -1,5 +1,5 @@
 // ============================================================
-// EngLand CRM — слой данных (Supabase)
+// EngLand CRM — оптимизированный слой данных
 // ============================================================
 let DB = {
   users: {},
@@ -16,16 +16,57 @@ let DB = {
 let dbReadyResolve;
 const dbReady = new Promise(resolve => { dbReadyResolve = resolve; });
 
+// Кэш в IndexedDB для мгновенной загрузки
+const CACHE_DB = 'england_cache';
+const CACHE_VERSION = 1;
+
+function openCacheDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(CACHE_DB, CACHE_VERSION);
+    request.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('data')) {
+        db.createObjectStore('data');
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveToCache(key, data) {
+  try {
+    const db = await openCacheDB();
+    const tx = db.transaction('data', 'readwrite');
+    tx.objectStore('data').put(data, key);
+  } catch (e) { console.error('Cache save error', e); }
+}
+
+async function loadFromCache(key) {
+  try {
+    const db = await openCacheDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('data', 'readonly');
+      const request = tx.objectStore('data').get(key);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  } catch (e) { return null; }
+}
+
+// Загружаем только нужные данные для роли
 async function loadAllFromSupabase() {
+  const startTime = performance.now();
+  
   const [
     usersRes, teachersRes, groupsRes, studentsRes,
     lessonsRes, attendanceRes, paymentsRes, homeworkRes, feedbackRes
   ] = await Promise.all([
-    supabaseClient.from("users").select("*"),
-    supabaseClient.from("teachers").select("*"),
-    supabaseClient.from("groups").select("*"),
+    supabaseClient.from("users").select("login,password,role,name,teacher_id,student_ids"),
+    supabaseClient.from("teachers").select("id,name"),
+    supabaseClient.from("groups").select("id,name,teacher_id,schedule,level"),
     supabaseClient.from("students").select("*"),
-    supabaseClient.from("lessons").select("*"),
+    supabaseClient.from("lessons").select("id,group_id,date,topic,status,materials,teacher_comment"),
     supabaseClient.from("attendance").select("*"),
     supabaseClient.from("payments").select("*"),
     supabaseClient.from("homework").select("*"),
@@ -75,6 +116,52 @@ async function loadAllFromSupabase() {
   DB.payments = paymentsRes.data || [];
   DB.homework = (homeworkRes.data || []).map(h => ({ ...h, studentId: h.student_id, groupId: h.group_id }));
   DB.feedback = (feedbackRes.data || []).map(f => ({ ...f, studentId: f.student_id, teacherId: f.teacher_id }));
+
+  // Сохраняем в кэш
+  await saveToCache('db_snapshot', {
+    timestamp: Date.now(),
+    data: {
+      users: DB.users,
+      teachers: DB.teachers,
+      groups: DB.groups,
+      students: DB.students,
+      lessons: DB.lessons,
+      attendance: DB.attendance,
+      payments: DB.payments,
+      homework: DB.homework,
+      feedback: DB.feedback,
+    }
+  });
+
+  console.log(`Data loaded in ${Math.round(performance.now() - startTime)}ms`);
+}
+
+// Быстрая загрузка из кэша + фоновое обновление
+async function loadFromCacheOrNetwork() {
+  const cached = await loadFromCache('db_snapshot');
+  if (cached && cached.data) {
+    // Мгновенно показываем кэш
+    DB.users = cached.data.users || {};
+    DB.teachers = cached.data.teachers || [];
+    DB.groups = cached.data.groups || [];
+    DB.students = cached.data.students || [];
+    DB.lessons = cached.data.lessons || [];
+    DB.attendance = cached.data.attendance || {};
+    DB.payments = cached.data.payments || [];
+    DB.homework = cached.data.homework || [];
+    DB.feedback = cached.data.feedback || [];
+    dataLoaded = true;
+    dbReadyResolve();
+    
+    // Фоновое обновление
+    setTimeout(() => {
+      loadAllFromSupabase().then(() => {
+        if (currentUser) renderPage();
+      });
+    }, 100);
+    return true;
+  }
+  return false;
 }
 
 function subscribeToRealtimeUpdates(onChange) {
@@ -248,7 +335,6 @@ async function dbAddGroup({ name, teacherId, schedule, level }) {
   await loadAllFromSupabase();
 }
 
-// 🔔 РУЧНОЕ УВЕДОМЛЕНИЕ РОДИТЕЛЮ (через Telegram)
 async function dbSendManualNotification(studentId, message) {
   const result = await supabaseClient.from("students")
     .select("parent_login")
@@ -259,7 +345,6 @@ async function dbSendManualNotification(studentId, message) {
     throw new Error("Ученик не привязан к родителю");
   }
 
-  // Сохраняем в БД как запись уведомления
   await supabaseClient.from("feedback").insert({
     id: "n" + Date.now(),
     student_id: studentId,
@@ -268,7 +353,6 @@ async function dbSendManualNotification(studentId, message) {
     text: "[УВЕДОМЛЕНИЕ РОДИТЕЛЮ] " + message,
   });
 
-  // Отправляем через Telegram webhook
   const response = await fetch('/api/telegram-webhook', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
